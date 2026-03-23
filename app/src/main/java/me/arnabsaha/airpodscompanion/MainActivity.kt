@@ -583,7 +583,7 @@ fun EarDot(label: String, inEar: Boolean) {
                 .background(if (inEar) AppleGreen else Color.Gray.copy(alpha = 0.3f))
         )
         Spacer(Modifier.width(4.dp))
-        Text("$label ${if (inEar) "In" else "Out"}", style = MaterialTheme.typography.bodySmall,
+        Text(label, style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
     }
 }

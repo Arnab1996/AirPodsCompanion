@@ -34,6 +34,8 @@ import me.arnabsaha.airpodscompanion.protocol.constants.BatteryComponent
 import me.arnabsaha.airpodscompanion.protocol.constants.BatteryStatus
 import me.arnabsaha.airpodscompanion.protocol.constants.ControlCommandId
 import me.arnabsaha.airpodscompanion.protocol.constants.NoiseControlMode
+import me.arnabsaha.airpodscompanion.utils.HeadGestureDetector
+import org.lsposed.hiddenapibypass.HiddenApiBypass
 
 /** Battery state from AACP packets (more accurate than BLE advertisement) */
 data class AacpBatteryState(
@@ -99,6 +101,11 @@ class AirPodsService : Service() {
     // ANC mode
     private val _ancMode = MutableStateFlow<Byte>(0x01) // OFF by default
     val ancMode: StateFlow<Byte> = _ancMode.asStateFlow()
+
+    // Head gesture detector
+    val gestureDetector = HeadGestureDetector()
+    private var headTrackingActive = false
+    private var connectedBtDevice: BluetoothDevice? = null
 
     /** All detected AirPods, keyed by BLE address */
     val detectedDevices: StateFlow<Map<String, AirPodsAdvertisement>>
@@ -203,6 +210,7 @@ class AirPodsService : Service() {
 
         Log.d(TAG, "Initiating AACP connection to bonded device: ${bondedAirPods.name} (${bondedAirPods.address})")
         _bondedDeviceName.value = bondedAirPods.name ?: "AirPods"
+        connectedBtDevice = bondedAirPods
         updateNotification("Connecting to ${bondedAirPods.name}...")
         _transport.connect(bondedAirPods)
     }
@@ -286,6 +294,82 @@ class AirPodsService : Service() {
         return nearest?.caseBattery ?: -1
     }
 
+    /** Play a find-my sound on the AirPods by maximizing chime volume and toggling ear detection */
+    fun playFindMySound() {
+        // Set chime volume to max
+        transport.sendControlCommand(ControlCommandId.CHIME_VOLUME, 100.toByte())
+        // Send in-case tone ON (triggers a beep)
+        transport.sendControlCommand(0x31.toByte(), 0x01)
+        Log.d(TAG, "Find My sound sent")
+    }
+
+    /** Set system Bluetooth metadata for battery display in Android Settings */
+    @SuppressLint("MissingPermission")
+    fun updateSystemBatteryMetadata() {
+        val device = connectedBtDevice ?: return
+        val battery = _aacpBattery.value ?: return
+
+        try {
+            HiddenApiBypass.addHiddenApiExemptions("Landroid/bluetooth/BluetoothDevice;")
+
+            val setMetadata = device.javaClass.getMethod(
+                "setMetadata", Int::class.javaPrimitiveType, ByteArray::class.javaPrimitiveType
+            )
+
+            // Metadata keys from BluetoothDevice hidden API
+            val META_UNTETHERED_LEFT_BATTERY = 18
+            val META_UNTETHERED_RIGHT_BATTERY = 19
+            val META_UNTETHERED_CASE_BATTERY = 20
+            val META_UNTETHERED_LEFT_CHARGING = 21
+            val META_UNTETHERED_RIGHT_CHARGING = 22
+            val META_UNTETHERED_CASE_CHARGING = 23
+            val META_MODEL_NAME = 4
+            val META_MANUFACTURER_NAME = 3
+            val META_DEVICE_TYPE = 7
+            val DEVICE_TYPE_UNTETHERED_HEADSET = "6"
+
+            if (battery.leftLevel >= 0)
+                setMetadata.invoke(device, META_UNTETHERED_LEFT_BATTERY,
+                    battery.leftLevel.toString().toByteArray())
+            if (battery.rightLevel >= 0)
+                setMetadata.invoke(device, META_UNTETHERED_RIGHT_BATTERY,
+                    battery.rightLevel.toString().toByteArray())
+            if (battery.caseLevel >= 0)
+                setMetadata.invoke(device, META_UNTETHERED_CASE_BATTERY,
+                    battery.caseLevel.toString().toByteArray())
+
+            setMetadata.invoke(device, META_UNTETHERED_LEFT_CHARGING,
+                if (battery.leftCharging) "true".toByteArray() else "false".toByteArray())
+            setMetadata.invoke(device, META_UNTETHERED_RIGHT_CHARGING,
+                if (battery.rightCharging) "true".toByteArray() else "false".toByteArray())
+            setMetadata.invoke(device, META_UNTETHERED_CASE_CHARGING,
+                if (battery.caseCharging) "true".toByteArray() else "false".toByteArray())
+
+            setMetadata.invoke(device, META_DEVICE_TYPE,
+                DEVICE_TYPE_UNTETHERED_HEADSET.toByteArray())
+            setMetadata.invoke(device, META_MANUFACTURER_NAME, "Apple".toByteArray())
+            setMetadata.invoke(device, META_MODEL_NAME,
+                (_bondedDeviceName.value ?: "AirPods Pro").toByteArray())
+
+            Log.d(TAG, "System battery metadata updated")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to set system battery metadata: ${e.message}")
+        }
+    }
+
+    /** Toggle head tracking with gesture detection */
+    fun toggleHeadTracking(): Boolean {
+        if (headTrackingActive) {
+            stopHeadTracking()
+            gestureDetector.reset()
+            headTrackingActive = false
+        } else {
+            startHeadTracking()
+            headTrackingActive = true
+        }
+        return headTrackingActive
+    }
+
     // ═══════════════════════════════════════
     // Internal
     // ═══════════════════════════════════════
@@ -348,6 +432,7 @@ class AirPodsService : Service() {
             AacpOpcode.CONTROL_COMMAND -> handleControlCommand(packet)
             AacpOpcode.CONVERSATION_AWARENESS -> handleConversationalAwareness(packet)
             AacpOpcode.STEM_PRESS -> handleStemPress(packet)
+            AacpOpcode.HEAD_TRACKING -> handleHeadTrackingData(packet)
             AacpOpcode.DEVICE_INFO -> handleDeviceInfo(packet)
             AacpOpcode.PROXIMITY_KEYS_RSP -> handleProximityKeys(packet)
             else -> Log.d(TAG, "Unhandled opcode: 0x${"%02X".format(packet.opcode)}")
@@ -391,6 +476,9 @@ class AirPodsService : Service() {
 
         _aacpBattery.value = left
         Log.d(TAG, "Battery: L=${left.leftLevel}% R=${left.rightLevel}% C=${left.caseLevel}%")
+
+        // Update system Bluetooth metadata
+        updateSystemBatteryMetadata()
 
         // Update notification with battery
         updateNotification("L: ${left.leftLevel}%  R: ${left.rightLevel}%  Case: ${if (left.caseLevel >= 0) "${left.caseLevel}%" else "--"}")
@@ -501,6 +589,27 @@ class AirPodsService : Service() {
     private fun handleProximityKeys(packet: AacpPacket) {
         Log.d(TAG, "Proximity keys response received (${packet.rawBytes.size} bytes)")
         // TODO: Parse and store IRK/ENC_KEY for RPA verification
+    }
+
+    // ═══ Head Tracking Data (opcode 0x17) ═══
+    private fun handleHeadTrackingData(packet: AacpPacket) {
+        if (!headTrackingActive) return
+
+        // Feed raw data to gesture detector
+        gestureDetector.processPacket(packet.rawBytes)
+
+        // Check for gestures and act on them
+        when (gestureDetector.lastGesture.value) {
+            HeadGestureDetector.Gesture.NOD_YES -> {
+                Log.d(TAG, "Head gesture: NOD (YES) — answering call")
+                sendMediaKey(KeyEvent.KEYCODE_CALL)
+            }
+            HeadGestureDetector.Gesture.SHAKE_NO -> {
+                Log.d(TAG, "Head gesture: SHAKE (NO) — declining call")
+                sendMediaKey(KeyEvent.KEYCODE_ENDCALL)
+            }
+            HeadGestureDetector.Gesture.NONE -> { /* no gesture */ }
+        }
     }
 
     // ═══ Media Control Helper ═══

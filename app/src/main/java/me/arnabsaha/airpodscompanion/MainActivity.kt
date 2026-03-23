@@ -92,6 +92,7 @@ import me.arnabsaha.airpodscompanion.protocol.constants.NoiseControlMode
 import me.arnabsaha.airpodscompanion.service.AacpBatteryState
 import me.arnabsaha.airpodscompanion.service.AirPodsService
 import me.arnabsaha.airpodscompanion.service.EarState
+import me.arnabsaha.airpodscompanion.ui.composables.ConnectionAnimation
 import me.arnabsaha.airpodscompanion.ui.theme.AirPodsCompanionTheme
 import me.arnabsaha.airpodscompanion.ui.theme.AppleGreen
 import me.arnabsaha.airpodscompanion.ui.theme.AppleOrange
@@ -342,7 +343,37 @@ fun DashboardScreen(service: AirPodsService) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
                 }
-                Text("Start", style = MaterialTheme.typography.labelLarge,
+                var headTrackingOn by remember { mutableStateOf(false) }
+                androidx.compose.material3.Switch(
+                    checked = headTrackingOn,
+                    onCheckedChange = {
+                        headTrackingOn = service.toggleHeadTracking()
+                    },
+                    colors = androidx.compose.material3.SwitchDefaults.colors(
+                        checkedTrackColor = AppleGreen, checkedThumbColor = Color.White
+                    )
+                )
+            }
+
+            Divider()
+
+            // Find My
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { service.playFindMySound() }
+                    .padding(vertical = 14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text("Find My AirPods", style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface)
+                    Text("Play a sound on your AirPods",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
+                }
+                Text("Play", style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary)
             }
         }
@@ -659,18 +690,14 @@ fun AirPodsCard(
     onConnect: () -> Unit
 ) {
     SectionCard {
-        // AirPods case image at top when connecting
+        // Connection animation when connecting
         if (connState == AacpTransport.ConnectionState.CONNECTING ||
             connState == AacpTransport.ConnectionState.HANDSHAKING) {
-            Box(Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                contentAlignment = Alignment.Center) {
-                androidx.compose.foundation.Image(
-                    painter = androidx.compose.ui.res.painterResource(R.drawable.airpods_case),
-                    contentDescription = "Connecting to AirPods",
-                    modifier = Modifier.size(100.dp).clip(RoundedCornerShape(16.dp)),
-                    contentScale = androidx.compose.ui.layout.ContentScale.Fit
-                )
-            }
+            ConnectionAnimation(
+                isConnecting = true,
+                isConnected = false,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
         }
 
         Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {

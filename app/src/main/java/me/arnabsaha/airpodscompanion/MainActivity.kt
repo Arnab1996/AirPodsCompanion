@@ -1,6 +1,7 @@
 package me.arnabsaha.airpodscompanion
 
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -40,7 +41,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.BluetoothSearching
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
@@ -327,10 +327,7 @@ fun DashboardScreen(vm: AirPodsViewModel) {
                 title = "Spatial Audio",
                 subtitle = "Head tracking for immersive sound",
                 enabled = headTrackingOn,
-                onToggle = {
                 onToggle = { vm.toggleHeadTracking() }
-                    saveBool("head_tracking", headTrackingOn)
-                }
             )
         }
 
@@ -343,27 +340,27 @@ fun DashboardScreen(vm: AirPodsViewModel) {
 
         SectionCard {
             // Chime Volume Slider with feedback
+            var localChimeVolume by remember { mutableStateOf(chimeVolume) }
+            LaunchedEffect(chimeVolume) { localChimeVolume = chimeVolume }
+
             Row(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.AutoMirrored.Filled.VolumeUp, null, Modifier.size(20.dp),
+                Icon(Icons.AutoMirrored.Filled.VolumeUp, "Chime Volume", Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
                         Text("Chime Volume", style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurface)
-                        Text("${chimeVolume.toInt()}%", style = MaterialTheme.typography.labelLarge,
+                        Text("${localChimeVolume.toInt()}%", style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary)
                     }
                     androidx.compose.material3.Slider(
-                        value = chimeVolume,
-                        onValueChange = { chimeVolume = it },
-                        onValueChangeFinished = {
-                            prefs.edit().putFloat("chime_volume", chimeVolume).apply()
-                        vm.setChimeVolume(chimeVolume)
-                        },
+                        value = localChimeVolume,
+                        onValueChange = { localChimeVolume = it },
+                        onValueChangeFinished = { vm.setChimeVolume(localChimeVolume) },
                         valueRange = 0f..100f,
                         modifier = Modifier.fillMaxWidth(),
                         colors = androidx.compose.material3.SliderDefaults.colors(

@@ -71,6 +71,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -138,10 +139,24 @@ fun MainScreen(vm: AirPodsViewModel) {
         DisposableEffect(Unit) { onDispose { vm.unbindService() } }
 
         val connState by vm.connectionState.collectAsState()
-        when (connState) {
-            AacpTransport.ConnectionState.CONNECTED -> DashboardScreen(vm)
-            AacpTransport.ConnectionState.DISCONNECTED,
-            AacpTransport.ConnectionState.FAILED -> DevicePickerScreen(vm)
+
+        // Minimum animation display time — show connecting for at least 2.5s
+        var showDashboard by remember { mutableStateOf(false) }
+        LaunchedEffect(connState) {
+            if (connState == AacpTransport.ConnectionState.CONNECTED) {
+                if (!showDashboard) {
+                    kotlinx.coroutines.delay(2500) // Let animation play
+                    showDashboard = true
+                }
+            } else {
+                showDashboard = false
+            }
+        }
+
+        when {
+            showDashboard && connState == AacpTransport.ConnectionState.CONNECTED -> DashboardScreen(vm)
+            connState == AacpTransport.ConnectionState.DISCONNECTED ||
+            connState == AacpTransport.ConnectionState.FAILED -> DevicePickerScreen(vm)
             else -> ConnectingScreen(vm, connState)
         }
     } else {
@@ -690,6 +705,7 @@ fun SectionCard(content: @Composable () -> Unit) {
 fun ConnectingScreen(vm: AirPodsViewModel, state: AacpTransport.ConnectionState) {
     val deviceName by vm.bondedDeviceName.collectAsState()
     val error by vm.connectionError.collectAsState()
+    val isConnected = state == AacpTransport.ConnectionState.CONNECTED
 
     Column(
         modifier = Modifier
@@ -699,23 +715,58 @@ fun ConnectingScreen(vm: AirPodsViewModel, state: AacpTransport.ConnectionState)
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        ConnectionAnimation(
-            isConnecting = state == AacpTransport.ConnectionState.CONNECTING ||
-                           state == AacpTransport.ConnectionState.HANDSHAKING,
-            isConnected = false
+        // AirPods case image with pulse
+        val pulse = rememberInfiniteTransition(label = "cp")
+        val scale by pulse.animateFloat(0.95f, 1.05f,
+            infiniteRepeatable(tween(1200), RepeatMode.Reverse), label = "cs")
+
+        androidx.compose.foundation.Image(
+            painter = androidx.compose.ui.res.painterResource(R.drawable.airpods_case),
+            contentDescription = "AirPods",
+            modifier = Modifier
+                .size(140.dp)
+                .scale(if (!isConnected) scale else 1f)
+                .clip(RoundedCornerShape(24.dp)),
+            contentScale = androidx.compose.ui.layout.ContentScale.Fit
         )
-        Spacer(Modifier.height(8.dp))
+
+        Spacer(Modifier.height(24.dp))
+
+        // Connection animation (case opening)
+        ConnectionAnimation(
+            isConnecting = !isConnected,
+            isConnected = isConnected
+        )
+
+        Spacer(Modifier.height(16.dp))
+
         Text(
             text = deviceName ?: "AirPods",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground
         )
-        if (state == AacpTransport.ConnectionState.RECONNECTING) {
-            Spacer(Modifier.height(8.dp))
-            Text("Connection lost, reconnecting...",
-                style = MaterialTheme.typography.bodySmall,
-                color = AppleOrange)
-        }
+
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            text = when (state) {
+                AacpTransport.ConnectionState.CONNECTING -> "Connecting..."
+                AacpTransport.ConnectionState.HANDSHAKING -> "Setting up..."
+                AacpTransport.ConnectionState.RECONNECTING -> "Reconnecting..."
+                AacpTransport.ConnectionState.CONNECTED -> "Connected!"
+                AacpTransport.ConnectionState.FAILED -> "Connection failed"
+                else -> "Searching..."
+            },
+            style = MaterialTheme.typography.bodyLarge,
+            color = when (state) {
+                AacpTransport.ConnectionState.CONNECTED -> AppleGreen
+                AacpTransport.ConnectionState.FAILED -> AppleRed
+                AacpTransport.ConnectionState.RECONNECTING -> AppleOrange
+                else -> MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+            }
+        )
+
         if (error != null) {
             Spacer(Modifier.height(12.dp))
             Text(error ?: "",

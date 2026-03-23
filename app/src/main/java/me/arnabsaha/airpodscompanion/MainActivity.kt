@@ -51,12 +51,15 @@ import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.HeadsetMic
 import androidx.compose.material.icons.filled.HearingDisabled
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.SurroundSound
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -253,7 +256,7 @@ fun DashboardScreen(service: AirPodsService) {
 
         Spacer(Modifier.height(20.dp))
 
-        // Settings section with proper toggles
+        // Settings section with proper toggles and icons
         Text("Features", style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
             modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
@@ -263,27 +266,33 @@ fun DashboardScreen(service: AirPodsService) {
             var avEnabled by remember { mutableStateOf(false) }
             var edEnabled by remember { mutableStateOf(true) }
 
-            ToggleRow("Conversational Awareness", "Lower volume when you speak",
-                enabled = caEnabled, onToggle = {
-                    caEnabled = it
-                    service.setConversationalAwareness(it)
-                })
+            IconToggleRow(
+                icon = Icons.AutoMirrored.Filled.VolumeOff,
+                title = "Conversational Awareness",
+                subtitle = "Lower volume when you speak",
+                enabled = caEnabled,
+                onToggle = { caEnabled = it; service.setConversationalAwareness(it) }
+            )
 
             Divider()
 
-            ToggleRow("Adaptive Volume", "Adjust to your environment",
-                enabled = avEnabled, onToggle = {
-                    avEnabled = it
-                    service.setAdaptiveVolume(it)
-                })
+            IconToggleRow(
+                icon = Icons.Default.GraphicEq,
+                title = "Adaptive Volume",
+                subtitle = "Adjust to your environment",
+                enabled = avEnabled,
+                onToggle = { avEnabled = it; service.setAdaptiveVolume(it) }
+            )
 
             Divider()
 
-            ToggleRow("Ear Detection", "Auto play/pause",
-                enabled = edEnabled, onToggle = {
-                    edEnabled = it
-                    service.setEarDetection(it)
-                })
+            IconToggleRow(
+                icon = Icons.Default.Headphones,
+                title = "Ear Detection",
+                subtitle = "Auto play/pause",
+                enabled = edEnabled,
+                onToggle = { edEnabled = it; service.setEarDetection(it) }
+            )
         }
 
         Spacer(Modifier.height(20.dp))
@@ -296,23 +305,26 @@ fun DashboardScreen(service: AirPodsService) {
         SectionCard {
             var showRenameDialog by remember { mutableStateOf(false) }
 
+            // Rename row with pencil icon
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { showRenameDialog = true }
                     .padding(vertical = 14.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Icon(Icons.Default.Edit, null, Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
                     Text("Name", style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface)
                     Text(deviceName ?: "AirPods Pro",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
                 }
-                Text("Edit", style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary)
+                Icon(Icons.Default.Edit, null, Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.primary)
             }
 
             if (showRenameDialog) {
@@ -328,53 +340,35 @@ fun DashboardScreen(service: AirPodsService) {
 
             Divider()
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { service.startHeadTracking() }
-                    .padding(vertical = 14.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text("Spatial Audio", style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface)
-                    Text("Head tracking for spatial audio",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
-                }
-                var headTrackingOn by remember { mutableStateOf(false) }
-                androidx.compose.material3.Switch(
-                    checked = headTrackingOn,
-                    onCheckedChange = {
-                        headTrackingOn = service.toggleHeadTracking()
-                    },
-                    colors = androidx.compose.material3.SwitchDefaults.colors(
-                        checkedTrackColor = AppleGreen, checkedThumbColor = Color.White
-                    )
-                )
-            }
+            // Spatial Audio with icon
+            var headTrackingOn by remember { mutableStateOf(false) }
+            IconToggleRow(
+                icon = Icons.Default.SurroundSound,
+                title = "Spatial Audio",
+                subtitle = "Head tracking for immersive sound",
+                enabled = headTrackingOn,
+                onToggle = { headTrackingOn = service.toggleHeadTracking() }
+            )
 
             Divider()
 
-            // Find My
+            // Find My — honest about limitations
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { service.playFindMySound() }
                     .padding(vertical = 14.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Icon(Icons.Default.LocationOn, null, Modifier.size(20.dp),
+                    tint = Color.Gray.copy(alpha = 0.5f))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
                     Text("Find My AirPods", style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface)
-                    Text("Play a sound on your AirPods",
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                    Text("Requires Apple Find My protocol (not available via AACP)",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f))
                 }
-                Text("Play", style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary)
             }
         }
 
@@ -496,6 +490,42 @@ fun AncSegmentedControl(currentMode: Byte, onModeChange: (Byte) -> Unit) {
                 }
             }
         }
+    }
+}
+
+@Composable
+fun IconToggleRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onToggle(!enabled) }
+            .padding(vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, null, Modifier.size(20.dp),
+            tint = if (enabled) MaterialTheme.colorScheme.primary
+                   else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
+        }
+        androidx.compose.material3.Switch(
+            checked = enabled,
+            onCheckedChange = onToggle,
+            colors = androidx.compose.material3.SwitchDefaults.colors(
+                checkedTrackColor = AppleGreen,
+                checkedThumbColor = Color.White
+            )
+        )
     }
 }
 

@@ -419,7 +419,7 @@ class AirPodsService : Service() {
                 try {
                     dispatchPacket(packet)
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error dispatching packet: $e")
+                    Log.e(TAG, "Error dispatching packet opcode=0x${"%02X".format(packet.opcode)}: $e", e)
                 }
             }
         }
@@ -477,8 +477,10 @@ class AirPodsService : Service() {
         _aacpBattery.value = left
         Log.d(TAG, "Battery: L=${left.leftLevel}% R=${left.rightLevel}% C=${left.caseLevel}%")
 
-        // Update system Bluetooth metadata
-        updateSystemBatteryMetadata()
+        // Update system Bluetooth metadata (best-effort, don't crash on failure)
+        try { updateSystemBatteryMetadata() } catch (e: Exception) {
+            Log.w(TAG, "System metadata update failed: ${e.message}")
+        }
 
         // Update notification with battery
         updateNotification("L: ${left.leftLevel}%  R: ${left.rightLevel}%  Case: ${if (left.caseLevel >= 0) "${left.caseLevel}%" else "--"}")

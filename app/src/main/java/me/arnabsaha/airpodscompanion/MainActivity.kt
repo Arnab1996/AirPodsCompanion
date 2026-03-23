@@ -720,15 +720,23 @@ fun ConnectingScreen(vm: AirPodsViewModel, state: AacpTransport.ConnectionState)
         val scale by pulse.animateFloat(0.95f, 1.05f,
             infiniteRepeatable(tween(1200), RepeatMode.Reverse), label = "cs")
 
-        androidx.compose.foundation.Image(
-            painter = androidx.compose.ui.res.painterResource(R.drawable.airpods_case),
-            contentDescription = "AirPods",
+        // AirPods case image with subtle background
+        val isDark = MaterialTheme.colorScheme.background == me.arnabsaha.airpodscompanion.ui.theme.DarkBackground
+        Box(
             modifier = Modifier
-                .size(140.dp)
-                .scale(if (!isConnected) scale else 1f)
-                .clip(RoundedCornerShape(24.dp)),
-            contentScale = androidx.compose.ui.layout.ContentScale.Fit
-        )
+                .size(160.dp)
+                .clip(RoundedCornerShape(28.dp))
+                .background(if (isDark) Color(0xFF1C1C1E) else Color(0xFFF0F0F5))
+                .scale(if (!isConnected) scale else 1f),
+            contentAlignment = Alignment.Center
+        ) {
+            androidx.compose.foundation.Image(
+                painter = androidx.compose.ui.res.painterResource(R.drawable.airpods_case),
+                contentDescription = "AirPods",
+                modifier = Modifier.size(120.dp),
+                contentScale = androidx.compose.ui.layout.ContentScale.Fit
+            )
+        }
 
         Spacer(Modifier.height(24.dp))
 

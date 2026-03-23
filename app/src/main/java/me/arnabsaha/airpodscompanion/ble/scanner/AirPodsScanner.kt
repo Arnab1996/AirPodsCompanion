@@ -33,7 +33,6 @@ class AirPodsScanner(context: Context) {
 
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
-    private val bleScanner: BluetoothLeScanner? = bluetoothAdapter?.bluetoothLeScanner
 
     private val parser = ManufacturerDataParser()
 
@@ -111,25 +110,36 @@ class AirPodsScanner(context: Context) {
             return
         }
 
-        if (bleScanner == null) {
-            Log.e(TAG, "BLE scanner not available (Bluetooth disabled?)")
+        // Check BT adapter is enabled before trying to scan
+        if (bluetoothAdapter?.isEnabled != true) {
+            Log.w(TAG, "Bluetooth not enabled, cannot start scan")
+            return
+        }
+
+        val scanner = bluetoothAdapter.bluetoothLeScanner
+        if (scanner == null) {
+            Log.e(TAG, "BLE scanner not available")
             return
         }
 
         Log.d(TAG, "Starting BLE scan for AirPods...")
-        bleScanner.startScan(scanFilters, scanSettings, scanCallback)
-        isScanning = true
+        try {
+            scanner.startScan(scanFilters, scanSettings, scanCallback)
+            isScanning = true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start scan: ${e.message}")
+            isScanning = false
+        }
     }
 
     @SuppressLint("MissingPermission")
     fun stopScan() {
         if (!isScanning) return
-
         Log.d(TAG, "Stopping BLE scan")
         try {
-            bleScanner?.stopScan(scanCallback)
+            bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
         } catch (e: Exception) {
-            Log.e(TAG, "Error stopping scan: $e")
+            Log.e(TAG, "Error stopping scan: ${e.message}")
         }
         isScanning = false
     }

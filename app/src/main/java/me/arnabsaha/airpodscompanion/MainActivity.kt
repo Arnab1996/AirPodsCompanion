@@ -49,6 +49,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.BluetoothSearching
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Edit
@@ -56,10 +57,12 @@ import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.HeadsetMic
 import androidx.compose.material.icons.filled.HearingDisabled
-import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.SurroundSound
+import androidx.compose.material.icons.filled.SwipeUp
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -349,27 +352,150 @@ fun DashboardScreen(service: AirPodsService) {
                 enabled = headTrackingOn,
                 onToggle = { headTrackingOn = service.toggleHeadTracking() }
             )
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        // Stem & Accessibility
+        Text("Stem & Accessibility", style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+            modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
+
+        SectionCard {
+            // Chime Volume Slider
+            var chimeVolume by remember { mutableStateOf(50f) }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.AutoMirrored.Filled.VolumeUp, null, Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Chime Volume", style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface)
+                    androidx.compose.material3.Slider(
+                        value = chimeVolume,
+                        onValueChange = { chimeVolume = it },
+                        onValueChangeFinished = { service.setChimeVolume(chimeVolume.toInt()) },
+                        valueRange = 0f..100f,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = androidx.compose.material3.SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.primary,
+                            activeTrackColor = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                    Text("${chimeVolume.toInt()}%", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+                }
+            }
 
             Divider()
 
-            // Find My — honest about limitations
+            var oneBudAnc by remember { mutableStateOf(true) }
+            IconToggleRow(
+                icon = Icons.Default.HearingDisabled,
+                title = "One Bud ANC",
+                subtitle = "Keep noise cancellation with one earbud",
+                enabled = oneBudAnc,
+                onToggle = {
+                    oneBudAnc = it
+                    service.transport.sendControlCommand(0x1B, if (it) 0x01 else 0x02)
+                }
+            )
+
+            Divider()
+
+            var volumeSwipe by remember { mutableStateOf(true) }
+            IconToggleRow(
+                icon = Icons.Default.SwipeUp,
+                title = "Volume Swipe",
+                subtitle = "Swipe stem to adjust volume",
+                enabled = volumeSwipe,
+                onToggle = {
+                    volumeSwipe = it
+                    service.transport.sendControlCommand(0x25, if (it) 0x01 else 0x02)
+                }
+            )
+
+            Divider()
+
+            var sleepDetection by remember { mutableStateOf(false) }
+            IconToggleRow(
+                icon = Icons.Default.Bedtime,
+                title = "Sleep Detection",
+                subtitle = "Auto-pause when you fall asleep",
+                enabled = sleepDetection,
+                onToggle = {
+                    sleepDetection = it
+                    service.transport.sendControlCommand(0x35, if (it) 0x01 else 0x02)
+                }
+            )
+
+            Divider()
+
+            var inCaseTone by remember { mutableStateOf(true) }
+            IconToggleRow(
+                icon = Icons.Default.NotificationsActive,
+                title = "In-Case Tone",
+                subtitle = "Sound when placing buds in case",
+                enabled = inCaseTone,
+                onToggle = {
+                    inCaseTone = it
+                    service.transport.sendControlCommand(0x31, if (it) 0x01 else 0x02)
+                }
+            )
+
+            Divider()
+
+            // Stem Long Press Configuration
+            var stemAction by remember { mutableStateOf("Noise Control") }
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 14.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Default.LocationOn, null, Modifier.size(20.dp),
-                    tint = Color.Gray.copy(alpha = 0.5f))
+                Icon(Icons.Default.TouchApp, null, Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Find My AirPods", style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
-                    Text("Requires Apple Find My protocol (not available via AACP)",
+                    Text("Press & Hold", style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface)
+                    Text("Currently: $stemAction",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f))
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
+                }
+                // Toggle between Noise Control and Siri
+                androidx.compose.material3.TextButton(onClick = {
+                    if (stemAction == "Noise Control") {
+                        stemAction = "Siri"
+                        service.transport.sendControlCommand(0x16, 0x05, 0x05)
+                    } else {
+                        stemAction = "Noise Control"
+                        service.transport.sendControlCommand(0x16, 0x01, 0x01)
+                    }
+                }) {
+                    Text(if (stemAction == "Noise Control") "Switch to Siri" else "Switch to ANC",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary)
                 }
             }
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        // Device Info Card
+        Text("About", style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+            modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
+
+        SectionCard {
+            InfoRow("Model", "AirPods Pro 2 (USB-C)")
+            Divider()
+            InfoRow("Firmware", "7B20 / MPMP")
+            Divider()
+            InfoRow("Bluetooth Address", "14:14:7D:EB:E0:65")
+            Divider()
+            InfoRow("Protocol", "AACP over L2CAP (PSM 0x1001)")
         }
 
         Spacer(Modifier.height(32.dp))
@@ -593,6 +719,20 @@ fun RenameDialog(currentName: String, onDismiss: () -> Unit, onRename: (String) 
         },
         containerColor = MaterialTheme.colorScheme.surface
     )
+}
+
+@Composable
+fun InfoRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+        Text(value, style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface)
+    }
 }
 
 @Composable

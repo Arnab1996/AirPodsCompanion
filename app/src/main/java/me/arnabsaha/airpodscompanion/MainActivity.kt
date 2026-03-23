@@ -440,9 +440,9 @@ fun DashboardScreen(vm: AirPodsViewModel) {
         SectionCard {
             InfoRow("Model", deviceName ?: "AirPods Pro")
             Divider()
-            InfoRow("Connection", "AACP over L2CAP (PSM 0x1001)")
+            InfoRow("Protocol", "AACP / L2CAP")
             Divider()
-            InfoRow("App Version", "0.1.0")
+            InfoRow("Version", "0.1.0")
         }
 
         Spacer(Modifier.height(32.dp))
@@ -490,8 +490,8 @@ fun BatteryGauge(label: String, level: Int, isCharging: Boolean) {
                 )
             } else {
                 Text(
-                    text = "N/A",
-                    style = MaterialTheme.typography.labelMedium,
+                    text = if (label == "Case") "Closed" else "—",
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
                 )
             }

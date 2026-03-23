@@ -154,7 +154,7 @@ class AacpTransport {
         Log.d(TAG, "Handshake sequence complete (5 packets sent)")
     }
 
-    /** Thread-safe send — serialized via mutex */
+    /** Thread-safe send */
     fun sendRaw(data: ByteArray) {
         scope.launch {
             try {
@@ -168,11 +168,9 @@ class AacpTransport {
 
     /** Direct send without launching a new coroutine — used during handshake */
     private suspend fun sendRawDirect(data: ByteArray) {
-        socketMutex.withLock {
-            val os = outputStream ?: throw IOException("Output stream is null")
-            os.write(data)
-            os.flush()
-        }
+        val os = outputStream ?: throw IOException("Output stream is null")
+        os.write(data)
+        os.flush()
         _rawPacketLog.tryEmit(Pair(true, data.clone()))
         Log.d(TAG, "TX: ${AacpPacketCodec.toHex(data)}")
     }

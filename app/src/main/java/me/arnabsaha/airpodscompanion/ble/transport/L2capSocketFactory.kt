@@ -28,28 +28,33 @@ object L2capSocketFactory {
 
     @SuppressLint("MissingPermission")
     fun createL2capSocket(device: BluetoothDevice): BluetoothSocket? {
-        // Strategy 1: Public API (Play Store safe)
+        // Strategy 1: HiddenApiBypass reflection (proven to work for classic BT L2CAP)
+        // The public createL2capChannel() API is for BLE CoC only, NOT classic Bluetooth.
+        val reflectionSocket = createViaReflection(device)
+        if (reflectionSocket != null) return reflectionSocket
+
+        // Strategy 2: RFCOMM with AAP UUID (some devices map this to L2CAP)
+        try {
+            val socket = device.createRfcommSocketToServiceRecord(AacpConstants.L2CAP_UUID)
+            Log.d(TAG, "Created socket via RFCOMM UUID fallback")
+            return socket
+        } catch (e: Exception) {
+            Log.d(TAG, "RFCOMM fallback failed: ${e.message}")
+        }
+
+        // Strategy 3: Public API (BLE L2CAP CoC — unlikely to work for classic BT, but try)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
                 val socket = device.createL2capChannel(AacpConstants.L2CAP_PSM)
                 Log.d(TAG, "Created socket via public createL2capChannel()")
                 return socket
             } catch (e: Exception) {
-                Log.d(TAG, "Public API failed: ${e.message}, trying RFCOMM fallback")
+                Log.d(TAG, "Public API failed: ${e.message}")
             }
         }
 
-        // Strategy 2: RFCOMM with AAP UUID
-        try {
-            val socket = device.createRfcommSocketToServiceRecord(AacpConstants.L2CAP_UUID)
-            Log.d(TAG, "Created socket via RFCOMM UUID fallback")
-            return socket
-        } catch (e: Exception) {
-            Log.d(TAG, "RFCOMM fallback failed: ${e.message}, trying reflection")
-        }
-
-        // Strategy 3: HiddenApiBypass reflection (for OEMs where above fail)
-        return createViaReflection(device)
+        Log.e(TAG, "All socket creation strategies failed")
+        return null
     }
 
     private fun createViaReflection(device: BluetoothDevice): BluetoothSocket? {

@@ -726,7 +726,7 @@ fun ConnectingScreen(vm: AirPodsViewModel, state: AacpTransport.ConnectionState)
             modifier = Modifier
                 .size(160.dp)
                 .clip(RoundedCornerShape(28.dp))
-                .background(if (isDark) Color(0xFF1C1C1E) else Color(0xFFF0F0F5))
+                .background(if (isDark) Color(0xFF1C1C1E) else Color(0xFFE0E0E8))
                 .scale(if (!isConnected) scale else 1f),
             contentAlignment = Alignment.Center
         ) {

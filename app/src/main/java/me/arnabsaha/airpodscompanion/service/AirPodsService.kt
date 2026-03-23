@@ -424,6 +424,7 @@ class AirPodsService : Service() {
 
     /** Toggle head tracking with gesture detection */
     fun toggleHeadTracking(): Boolean {
+        Log.d(TAG, "toggleHeadTracking called, current=$headTrackingActive")
         if (headTrackingActive) {
             stopHeadTracking()
             gestureDetector.reset()
@@ -432,6 +433,7 @@ class AirPodsService : Service() {
             startHeadTracking()
             headTrackingActive = true
         }
+        Log.d(TAG, "Head tracking now: $headTrackingActive")
         return headTrackingActive
     }
 
@@ -680,22 +682,31 @@ class AirPodsService : Service() {
 
     // ═══ Head Tracking Data (opcode 0x17) ═══
     private fun handleHeadTrackingData(packet: AacpPacket) {
+        Log.d(TAG, "Head tracking packet: ${packet.rawBytes.size}B, active=$headTrackingActive")
+
         if (!headTrackingActive) return
+        if (packet.rawBytes.size < 55) {
+            Log.d(TAG, "Head tracking packet too small for orientation data: ${packet.rawBytes.size}B")
+            return
+        }
 
         // Feed raw data to gesture detector
         gestureDetector.processPacket(packet.rawBytes)
 
         // Check for gestures and act on them
-        when (gestureDetector.lastGesture.value) {
-            HeadGestureDetector.Gesture.NOD_YES -> {
-                Log.d(TAG, "Head gesture: NOD (YES) — answering call")
-                sendMediaKey(KeyEvent.KEYCODE_CALL)
+        val gesture = gestureDetector.lastGesture.value
+        if (gesture != HeadGestureDetector.Gesture.NONE) {
+            when (gesture) {
+                HeadGestureDetector.Gesture.NOD_YES -> {
+                    Log.d(TAG, "HEAD GESTURE: NOD (YES)")
+                    sendMediaKey(KeyEvent.KEYCODE_CALL)
+                }
+                HeadGestureDetector.Gesture.SHAKE_NO -> {
+                    Log.d(TAG, "HEAD GESTURE: SHAKE (NO)")
+                    sendMediaKey(KeyEvent.KEYCODE_ENDCALL)
+                }
+                else -> {}
             }
-            HeadGestureDetector.Gesture.SHAKE_NO -> {
-                Log.d(TAG, "Head gesture: SHAKE (NO) — declining call")
-                sendMediaKey(KeyEvent.KEYCODE_ENDCALL)
-            }
-            HeadGestureDetector.Gesture.NONE -> { /* no gesture */ }
         }
     }
 

@@ -199,6 +199,33 @@ fun DashboardScreen(service: AirPodsService) {
     val ancMode by service.ancMode.collectAsState()
     val deviceName by service.bondedDeviceName.collectAsState()
     val scrollState = rememberScrollState()
+    val context = LocalContext.current
+
+    // Persisted settings
+    val prefs = remember { context.getSharedPreferences("airbridge_settings", Context.MODE_PRIVATE) }
+    fun saveBool(key: String, value: Boolean) { prefs.edit().putBoolean(key, value).apply() }
+    fun loadBool(key: String, default: Boolean) = prefs.getBoolean(key, default)
+
+    var caEnabled by remember { mutableStateOf(loadBool("ca_enabled", false)) }
+    var avEnabled by remember { mutableStateOf(loadBool("av_enabled", false)) }
+    var edEnabled by remember { mutableStateOf(loadBool("ed_enabled", true)) }
+    var oneBudAnc by remember { mutableStateOf(loadBool("one_bud_anc", true)) }
+    var volumeSwipe by remember { mutableStateOf(loadBool("volume_swipe", true)) }
+    var sleepDetection by remember { mutableStateOf(loadBool("sleep_detection", false)) }
+    var inCaseTone by remember { mutableStateOf(loadBool("in_case_tone", true)) }
+    var headTrackingOn by remember { mutableStateOf(loadBool("head_tracking", false)) }
+    var chimeVolume by remember { mutableStateOf(prefs.getFloat("chime_volume", 50f)) }
+    var stemAction by remember { mutableStateOf(prefs.getString("stem_action", "Noise Control") ?: "Noise Control") }
+
+    // Send saved settings on first connection
+    LaunchedEffect(Unit) {
+        service.setConversationalAwareness(caEnabled)
+        service.setAdaptiveVolume(avEnabled)
+        service.setEarDetection(edEnabled)
+        service.transport.sendControlCommand(0x1B, if (oneBudAnc) 0x01 else 0x02)
+        service.transport.sendControlCommand(0x25, if (volumeSwipe) 0x01 else 0x02)
+        service.setChimeVolume(chimeVolume.toInt())
+    }
 
     Column(
         modifier = Modifier
@@ -265,16 +292,12 @@ fun DashboardScreen(service: AirPodsService) {
             modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
 
         SectionCard {
-            var caEnabled by remember { mutableStateOf(false) }
-            var avEnabled by remember { mutableStateOf(false) }
-            var edEnabled by remember { mutableStateOf(true) }
-
             IconToggleRow(
                 icon = Icons.AutoMirrored.Filled.VolumeOff,
                 title = "Conversational Awareness",
                 subtitle = "Lower volume when you speak",
                 enabled = caEnabled,
-                onToggle = { caEnabled = it; service.setConversationalAwareness(it) }
+                onToggle = { caEnabled = it; saveBool("ca_enabled", it); service.setConversationalAwareness(it) }
             )
 
             Divider()
@@ -284,7 +307,7 @@ fun DashboardScreen(service: AirPodsService) {
                 title = "Adaptive Volume",
                 subtitle = "Adjust to your environment",
                 enabled = avEnabled,
-                onToggle = { avEnabled = it; service.setAdaptiveVolume(it) }
+                onToggle = { avEnabled = it; saveBool("av_enabled", it); service.setAdaptiveVolume(it) }
             )
 
             Divider()
@@ -294,7 +317,7 @@ fun DashboardScreen(service: AirPodsService) {
                 title = "Ear Detection",
                 subtitle = "Auto play/pause",
                 enabled = edEnabled,
-                onToggle = { edEnabled = it; service.setEarDetection(it) }
+                onToggle = { edEnabled = it; saveBool("ed_enabled", it); service.setEarDetection(it) }
             )
         }
 
@@ -344,13 +367,15 @@ fun DashboardScreen(service: AirPodsService) {
             Divider()
 
             // Spatial Audio with icon
-            var headTrackingOn by remember { mutableStateOf(false) }
             IconToggleRow(
                 icon = Icons.Default.SurroundSound,
                 title = "Spatial Audio",
                 subtitle = "Head tracking for immersive sound",
                 enabled = headTrackingOn,
-                onToggle = { headTrackingOn = service.toggleHeadTracking() }
+                onToggle = {
+                    headTrackingOn = service.toggleHeadTracking()
+                    saveBool("head_tracking", headTrackingOn)
+                }
             )
         }
 
@@ -362,8 +387,7 @@ fun DashboardScreen(service: AirPodsService) {
             modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
 
         SectionCard {
-            // Chime Volume Slider
-            var chimeVolume by remember { mutableStateOf(50f) }
+            // Chime Volume Slider with feedback
             Row(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -372,12 +396,19 @@ fun DashboardScreen(service: AirPodsService) {
                     tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Chime Volume", style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface)
+                    Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
+                        Text("Chime Volume", style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface)
+                        Text("${chimeVolume.toInt()}%", style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary)
+                    }
                     androidx.compose.material3.Slider(
                         value = chimeVolume,
                         onValueChange = { chimeVolume = it },
-                        onValueChangeFinished = { service.setChimeVolume(chimeVolume.toInt()) },
+                        onValueChangeFinished = {
+                            prefs.edit().putFloat("chime_volume", chimeVolume).apply()
+                            service.setChimeVolume(chimeVolume.toInt())
+                        },
                         valueRange = 0f..100f,
                         modifier = Modifier.fillMaxWidth(),
                         colors = androidx.compose.material3.SliderDefaults.colors(
@@ -385,71 +416,64 @@ fun DashboardScreen(service: AirPodsService) {
                             activeTrackColor = MaterialTheme.colorScheme.primary
                         )
                     )
-                    Text("${chimeVolume.toInt()}%", style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
                 }
             }
 
             Divider()
 
-            var oneBudAnc by remember { mutableStateOf(true) }
             IconToggleRow(
                 icon = Icons.Default.HearingDisabled,
                 title = "One Bud ANC",
                 subtitle = "Keep noise cancellation with one earbud",
                 enabled = oneBudAnc,
                 onToggle = {
-                    oneBudAnc = it
+                    oneBudAnc = it; saveBool("one_bud_anc", it)
                     service.transport.sendControlCommand(0x1B, if (it) 0x01 else 0x02)
                 }
             )
 
             Divider()
 
-            var volumeSwipe by remember { mutableStateOf(true) }
             IconToggleRow(
                 icon = Icons.Default.SwipeUp,
                 title = "Volume Swipe",
                 subtitle = "Swipe stem to adjust volume",
                 enabled = volumeSwipe,
                 onToggle = {
-                    volumeSwipe = it
+                    volumeSwipe = it; saveBool("volume_swipe", it)
                     service.transport.sendControlCommand(0x25, if (it) 0x01 else 0x02)
                 }
             )
 
             Divider()
 
-            var sleepDetection by remember { mutableStateOf(false) }
             IconToggleRow(
                 icon = Icons.Default.Bedtime,
                 title = "Sleep Detection",
                 subtitle = "Auto-pause when you fall asleep",
                 enabled = sleepDetection,
                 onToggle = {
-                    sleepDetection = it
+                    sleepDetection = it; saveBool("sleep_detection", it)
                     service.transport.sendControlCommand(0x35, if (it) 0x01 else 0x02)
                 }
             )
 
             Divider()
 
-            var inCaseTone by remember { mutableStateOf(true) }
             IconToggleRow(
                 icon = Icons.Default.NotificationsActive,
                 title = "In-Case Tone",
                 subtitle = "Sound when placing buds in case",
                 enabled = inCaseTone,
                 onToggle = {
-                    inCaseTone = it
+                    inCaseTone = it; saveBool("in_case_tone", it)
                     service.transport.sendControlCommand(0x31, if (it) 0x01 else 0x02)
                 }
             )
 
             Divider()
 
-            // Stem Long Press Configuration
-            var stemAction by remember { mutableStateOf("Noise Control") }
+            // Stem Long Press Configuration — Noise Control vs Off
             Row(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -464,17 +488,14 @@ fun DashboardScreen(service: AirPodsService) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
                 }
-                // Toggle between Noise Control and Siri
                 androidx.compose.material3.TextButton(onClick = {
-                    if (stemAction == "Noise Control") {
-                        stemAction = "Siri"
-                        service.transport.sendControlCommand(0x16, 0x05, 0x05)
-                    } else {
-                        stemAction = "Noise Control"
-                        service.transport.sendControlCommand(0x16, 0x01, 0x01)
-                    }
+                    stemAction = if (stemAction == "Noise Control") "Off" else "Noise Control"
+                    prefs.edit().putString("stem_action", stemAction).apply()
+                    service.transport.sendControlCommand(0x16,
+                        if (stemAction == "Noise Control") 0x01 else 0x00,
+                        if (stemAction == "Noise Control") 0x01 else 0x00)
                 }) {
-                    Text(if (stemAction == "Noise Control") "Switch to Siri" else "Switch to ANC",
+                    Text(if (stemAction == "Noise Control") "Set to Off" else "Set to Noise Control",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary)
                 }

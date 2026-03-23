@@ -144,7 +144,8 @@ class AirPodsService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "Service started")
-        if (!scanner.isScanning()) {
+        // Only restart scanning if not currently connected
+        if (!scanner.isScanning() && !_transport.isConnected) {
             scanner.startScan()
         }
         return START_STICKY
@@ -442,54 +443,59 @@ class AirPodsService : Service() {
     // ═══ Battery Handler (opcode 0x04) ═══
     private fun handleBatteryPacket(packet: AacpPacket) {
         val raw = packet.rawBytes
-        if (raw.size < 22) {
+        Log.d(TAG, "Battery packet size: ${raw.size}, hex: ${raw.take(30).joinToString(" ") { "%02X".format(it) }}")
+
+        if (raw.size < 12) {
             Log.w(TAG, "Battery packet too short: ${raw.size}")
             return
         }
-        // Format: 04 00 04 00 04 00 [count] [comp] 01 [level] [status] 01 ...
-        // Offsets: 7=comp1, 9=level1, 10=status1, 12=comp2, 14=level2, 15=status2, 17=comp3, 19=level3, 20=status3
-        val comp1 = raw[7].toInt() and 0xFF
-        val level1 = raw[9].toInt() and 0xFF
-        val status1 = raw[10].toInt() and 0xFF
-        val comp2 = raw[12].toInt() and 0xFF
-        val level2 = raw[14].toInt() and 0xFF
-        val status2 = raw[15].toInt() and 0xFF
-        val comp3 = raw[17].toInt() and 0xFF
-        val level3 = raw[19].toInt() and 0xFF
-        val status3 = raw[20].toInt() and 0xFF
 
-        var left = AacpBatteryState()
-        fun applyComponent(comp: Int, level: Int, status: Int) {
+        // Format: 04 00 04 00 04 00 [count] [comp] 01 [level] [status] 01 ...
+        // Parse all components dynamically based on count
+        val count = raw[6].toInt() and 0xFF
+        var state = AacpBatteryState()
+        var offset = 7
+
+        for (i in 0 until count) {
+            if (offset + 4 > raw.size) break
+            val comp = raw[offset].toInt() and 0xFF
+            val level = raw[offset + 2].toInt() and 0xFF
+            val status = raw[offset + 3].toInt() and 0xFF
             val charging = status == BatteryStatus.CHARGING
             val disconnected = status == BatteryStatus.DISCONNECTED
             val battLevel = if (disconnected) -1 else level
-            left = when (comp) {
-                BatteryComponent.LEFT -> left.copy(leftLevel = battLevel, leftCharging = charging)
-                BatteryComponent.RIGHT -> left.copy(rightLevel = battLevel, rightCharging = charging)
-                BatteryComponent.CASE -> left.copy(caseLevel = battLevel, caseCharging = charging)
-                else -> left
+
+            state = when (comp) {
+                BatteryComponent.LEFT -> state.copy(leftLevel = battLevel, leftCharging = charging)
+                BatteryComponent.RIGHT -> state.copy(rightLevel = battLevel, rightCharging = charging)
+                BatteryComponent.CASE -> state.copy(caseLevel = battLevel, caseCharging = charging)
+                else -> { Log.d(TAG, "Unknown battery component: $comp"); state }
             }
+            // Each component block is 5 bytes: comp, 0x01, level, status, 0x01
+            offset += 5
         }
-        applyComponent(comp1, level1, status1)
-        applyComponent(comp2, level2, status2)
-        applyComponent(comp3, level3, status3)
 
-        _aacpBattery.value = left
-        Log.d(TAG, "Battery: L=${left.leftLevel}% R=${left.rightLevel}% C=${left.caseLevel}%")
+        _aacpBattery.value = state
+        Log.d(TAG, "Battery: L=${state.leftLevel}% R=${state.rightLevel}% C=${state.caseLevel}%")
 
-        // Update system Bluetooth metadata (best-effort, don't crash on failure)
+        // Update system Bluetooth metadata (best-effort)
         try { updateSystemBatteryMetadata() } catch (e: Exception) {
             Log.w(TAG, "System metadata update failed: ${e.message}")
         }
 
         // Update notification with battery
-        updateNotification("L: ${left.leftLevel}%  R: ${left.rightLevel}%  Case: ${if (left.caseLevel >= 0) "${left.caseLevel}%" else "--"}")
+        updateNotification("L: ${state.leftLevel}%  R: ${state.rightLevel}%  Case: ${if (state.caseLevel >= 0) "${state.caseLevel}%" else "--"}")
     }
 
     // ═══ Ear Detection Handler (opcode 0x06) ═══
     private fun handleEarDetection(packet: AacpPacket) {
         val raw = packet.rawBytes
-        if (raw.size < 8) return
+        Log.d(TAG, "Ear detection packet size: ${raw.size}, hex: ${raw.joinToString(" ") { "%02X".format(it) }}")
+
+        if (raw.size < 8) {
+            Log.w(TAG, "Ear detection packet too short: ${raw.size}")
+            return
+        }
 
         // primary = left bud status, secondary = right bud status
         // 0x00 = In Ear, 0x01 = Out of Ear, 0x02 = In Case

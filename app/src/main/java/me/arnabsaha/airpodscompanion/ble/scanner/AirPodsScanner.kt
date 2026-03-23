@@ -98,26 +98,9 @@ class AirPodsScanner(context: Context) {
 
         Log.d(TAG, "Detected: $advertisement")
 
-        // Deduplicate by model: AirPods use rotating BLE addresses (RPA),
-        // so the same device shows up with different addresses.
-        // Keep only the entry with the strongest RSSI per model.
-        _detectedDevices.update { current ->
-            val modelKey = advertisement.deviceModel.toString()
-            val existing = current.values.find {
-                it.deviceModel == advertisement.deviceModel && it.address != address
-            }
-            val updated = current.toMutableMap()
-            if (existing != null && advertisement.rssi > existing.rssi) {
-                // Remove the weaker duplicate
-                updated.remove(existing.address)
-            } else if (existing != null && advertisement.rssi <= existing.rssi) {
-                // Update the existing entry's timestamp but keep its address
-                updated[existing.address] = existing.copy(timestampMs = System.currentTimeMillis())
-                return@update updated
-            }
-            updated[address] = advertisement
-            updated
-        }
+        // Simple update — keep all addresses but let the UI sort by RSSI.
+        // The user's AirPods will have the strongest signal.
+        _detectedDevices.update { current -> current + (address to advertisement) }
         _nearestAirPods.value = _detectedDevices.value.values.maxByOrNull { it.rssi }
     }
 

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Left AirPod body (teardrop shape) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M46,30 C49,28 52,30 52,34 C52,38 49,41 46,41 C43,41 41,38 41,34 C41,31 43,29 46,30 Z" />
+
+    <!-- Left AirPod stem -->
+    <path
+        android:pathData="M44.5,41 L44.5,58"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round" />
+
+    <!-- Left AirPod ear tip -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M44.5,58 m-4.5,0 a4.5,4 0 1,0 9,0 a4.5,4 0 1,0 -9,0" />
+
+    <!-- Right AirPod body (teardrop shape, mirrored) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M62,30 C59,28 56,30 56,34 C56,38 59,41 62,41 C65,41 67,38 67,34 C67,31 65,29 62,30 Z" />
+
+    <!-- Right AirPod stem -->
+    <path
+        android:pathData="M63.5,41 L63.5,58"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round" />
+
+    <!-- Right AirPod ear tip -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M63.5,58 m-4.5,0 a4.5,4 0 1,0 9,0 a4.5,4 0 1,0 -9,0" />
+
+    <!-- Subtle blue glow ring around both pods -->
+    <path
+        android:pathData="M54,44 m-22,0 a22,22 0 1,0 44,0 a22,22 0 1,0 -44,0"
+        android:strokeColor="#007AFF"
+        android:strokeWidth="1.2"
+        android:strokeAlpha="0.35"
+        android:fillColor="@android:color/transparent" />
+</vector>

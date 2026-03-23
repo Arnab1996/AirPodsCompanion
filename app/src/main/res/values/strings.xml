@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AirBridge</string>
+    <string name="app_description">Bridge your AirPods to Android — full control, no limits</string>
+    <string name="permissions_required">AirPods Companion needs Bluetooth, notification, and phone permissions to communicate with your AirPods and provide the full feature set.</string>
+</resources>

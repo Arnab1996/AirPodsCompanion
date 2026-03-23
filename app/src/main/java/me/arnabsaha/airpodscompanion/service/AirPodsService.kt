@@ -34,6 +34,7 @@ import me.arnabsaha.airpodscompanion.protocol.constants.BatteryComponent
 import me.arnabsaha.airpodscompanion.protocol.constants.BatteryStatus
 import me.arnabsaha.airpodscompanion.protocol.constants.ControlCommandId
 import me.arnabsaha.airpodscompanion.protocol.constants.NoiseControlMode
+import me.arnabsaha.airpodscompanion.ui.popup.ConnectionPopup
 import me.arnabsaha.airpodscompanion.utils.HeadGestureDetector
 import org.lsposed.hiddenapibypass.HiddenApiBypass
 
@@ -115,6 +116,8 @@ class AirPodsService : Service() {
     val bondedAirPodsList: StateFlow<List<BondedAirPods>> = _bondedAirPodsList.asStateFlow()
     private var headTrackingActive = false
     private var connectedBtDevice: BluetoothDevice? = null
+    private val gestureDetector = HeadGestureDetector()
+    private lateinit var connectionPopup: ConnectionPopup
 
     /** All detected AirPods, keyed by BLE address */
     val detectedDevices: StateFlow<Map<String, AirPodsAdvertisement>>
@@ -143,6 +146,8 @@ class AirPodsService : Service() {
         Log.d(TAG, "Service created")
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification("Scanning for AirPods..."))
+
+        connectionPopup = ConnectionPopup(this)
 
         scanner = AirPodsScanner(this)
         scanner.startScan()
@@ -413,6 +418,20 @@ class AirPodsService : Service() {
                     AacpTransport.ConnectionState.CONNECTED -> {
                         scanner.stopScan()
                         Log.d(TAG, "Stopped BLE scan (connected)")
+
+                        // Show Dynamic Island popup
+                        val ancName = when (_ancMode.value) {
+                            NoiseControlMode.OFF -> "Off"
+                            NoiseControlMode.NOISE_CANCELLATION -> "Noise Cancellation"
+                            NoiseControlMode.TRANSPARENCY -> "Transparency"
+                            NoiseControlMode.ADAPTIVE -> "Adaptive"
+                            else -> "ANC"
+                        }
+                        connectionPopup.show(
+                            _bondedDeviceName.value ?: "AirPods",
+                            _aacpBattery.value,
+                            ancName
+                        )
                     }
                     AacpTransport.ConnectionState.DISCONNECTED -> {
                         if (!scanner.isScanning()) {

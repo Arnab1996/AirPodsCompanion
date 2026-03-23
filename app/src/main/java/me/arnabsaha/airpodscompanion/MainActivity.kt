@@ -1,13 +1,8 @@
 package me.arnabsaha.airpodscompanion
 
 import android.annotation.SuppressLint
-import android.content.ComponentName
-import android.content.Context
-import android.content.Intent
-import android.content.ServiceConnection
 import android.os.Build
 import android.os.Bundle
-import android.os.IBinder
 import android.provider.Settings
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -95,58 +90,29 @@ import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import me.arnabsaha.airpodscompanion.ble.transport.AacpTransport
 import me.arnabsaha.airpodscompanion.protocol.constants.NoiseControlMode
-import me.arnabsaha.airpodscompanion.service.AacpBatteryState
-import me.arnabsaha.airpodscompanion.service.AirPodsService
 import me.arnabsaha.airpodscompanion.service.BondedAirPods
-import me.arnabsaha.airpodscompanion.service.EarState
 import me.arnabsaha.airpodscompanion.ui.composables.ConnectionAnimation
 import me.arnabsaha.airpodscompanion.ui.theme.AirPodsCompanionTheme
 import me.arnabsaha.airpodscompanion.ui.theme.AppleGreen
 import me.arnabsaha.airpodscompanion.ui.theme.AppleOrange
 import me.arnabsaha.airpodscompanion.ui.theme.AppleRed
+import me.arnabsaha.airpodscompanion.viewmodel.AirPodsViewModel
+import me.arnabsaha.airpodscompanion.viewmodel.AirPodsViewModelFactory
 
 private const val TAG = "MainActivity"
 
 class MainActivity : ComponentActivity() {
-    private var airPodsService = mutableStateOf<AirPodsService?>(null)
-    private var serviceBound = false
-
-    private val serviceConnection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-            airPodsService.value = (service as AirPodsService.LocalBinder).getService()
-            serviceBound = true
-        }
-        override fun onServiceDisconnected(name: ComponentName?) {
-            airPodsService.value = null
-            serviceBound = false
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             AirPodsCompanionTheme {
-                MainScreen(
-                    service = airPodsService.value,
-                    bindService = { bindAirPodsService() },
-                    unbindService = { unbindAirPodsService() }
+                val viewModel: AirPodsViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+                    factory = AirPodsViewModelFactory(application)
                 )
+                MainScreen(viewModel)
             }
         }
-    }
-
-    override fun onDestroy() { unbindAirPodsService(); super.onDestroy() }
-
-    private fun bindAirPodsService() {
-        if (!serviceBound) {
-            val intent = Intent(this, AirPodsService::class.java)
-            startForegroundService(intent)
-            bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
-        }
-    }
-    private fun unbindAirPodsService() {
-        if (serviceBound) { try { unbindService(serviceConnection) } catch (_: Exception) {} ; serviceBound = false }
     }
 }
 
@@ -156,7 +122,7 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
-fun MainScreen(service: AirPodsService?, bindService: () -> Unit, unbindService: () -> Unit) {
+fun MainScreen(vm: AirPodsViewModel) {
     val context = LocalContext.current
     val perms = rememberMultiplePermissionsState(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) listOf(
@@ -171,19 +137,15 @@ fun MainScreen(service: AirPodsService?, bindService: () -> Unit, unbindService:
     )
 
     if (perms.allPermissionsGranted) {
-        LaunchedEffect(Unit) { bindService() }
-        DisposableEffect(Unit) { onDispose { unbindService() } }
+        LaunchedEffect(Unit) { vm.bindService() }
+        DisposableEffect(Unit) { onDispose { vm.unbindService() } }
 
-        if (service != null) {
-            val connState by service.connectionState.collectAsState()
-            when (connState) {
-                AacpTransport.ConnectionState.CONNECTED -> DashboardScreen(service)
-                AacpTransport.ConnectionState.DISCONNECTED,
-                AacpTransport.ConnectionState.FAILED -> DevicePickerScreen(service)
-                else -> ConnectingScreen(service, connState)
-            }
-        } else {
-            LoadingScreen()
+        val connState by vm.connectionState.collectAsState()
+        when (connState) {
+            AacpTransport.ConnectionState.CONNECTED -> DashboardScreen(vm)
+            AacpTransport.ConnectionState.DISCONNECTED,
+            AacpTransport.ConnectionState.FAILED -> DevicePickerScreen(vm)
+            else -> ConnectingScreen(vm, connState)
         }
     } else {
         PermissionsScreen(perms, Settings.canDrawOverlays(context))
@@ -195,39 +157,24 @@ fun MainScreen(service: AirPodsService?, bindService: () -> Unit, unbindService:
 // ═══════════════════════════════════════════════════════════════
 
 @Composable
-fun DashboardScreen(service: AirPodsService) {
-    val battery by service.aacpBattery.collectAsState()
-    val earState by service.earState.collectAsState()
-    val ancMode by service.ancMode.collectAsState()
-    val deviceName by service.bondedDeviceName.collectAsState()
+fun DashboardScreen(vm: AirPodsViewModel) {
+    val battery by vm.battery.collectAsState()
+    val earState by vm.earState.collectAsState()
+    val ancMode by vm.ancMode.collectAsState()
+    val deviceName by vm.bondedDeviceName.collectAsState()
     val scrollState = rememberScrollState()
-    val context = LocalContext.current
 
-    // Persisted settings
-    val prefs = remember { context.getSharedPreferences("airbridge_settings", Context.MODE_PRIVATE) }
-    fun saveBool(key: String, value: Boolean) { prefs.edit().putBoolean(key, value).apply() }
-    fun loadBool(key: String, default: Boolean) = prefs.getBoolean(key, default)
-
-    var caEnabled by remember { mutableStateOf(loadBool("ca_enabled", false)) }
-    var avEnabled by remember { mutableStateOf(loadBool("av_enabled", false)) }
-    var edEnabled by remember { mutableStateOf(loadBool("ed_enabled", true)) }
-    var oneBudAnc by remember { mutableStateOf(loadBool("one_bud_anc", true)) }
-    var volumeSwipe by remember { mutableStateOf(loadBool("volume_swipe", true)) }
-    var sleepDetection by remember { mutableStateOf(loadBool("sleep_detection", false)) }
-    var inCaseTone by remember { mutableStateOf(loadBool("in_case_tone", true)) }
-    var headTrackingOn by remember { mutableStateOf(loadBool("head_tracking", false)) }
-    var chimeVolume by remember { mutableStateOf(prefs.getFloat("chime_volume", 50f)) }
-    var stemAction by remember { mutableStateOf(prefs.getString("stem_action", "Noise Control") ?: "Noise Control") }
-
-    // Send saved settings on first connection
-    LaunchedEffect(Unit) {
-        service.setConversationalAwareness(caEnabled)
-        service.setAdaptiveVolume(avEnabled)
-        service.setEarDetection(edEnabled)
-        service.transport.sendControlCommand(0x1B, if (oneBudAnc) 0x01 else 0x02)
-        service.transport.sendControlCommand(0x25, if (volumeSwipe) 0x01 else 0x02)
-        service.setChimeVolume(chimeVolume.toInt())
-    }
+    // Persisted settings from ViewModel
+    val caEnabled by vm.caEnabled.collectAsState()
+    val avEnabled by vm.avEnabled.collectAsState()
+    val edEnabled by vm.edEnabled.collectAsState()
+    val oneBudAnc by vm.oneBudAnc.collectAsState()
+    val volumeSwipe by vm.volumeSwipe.collectAsState()
+    val sleepDetection by vm.sleepDetection.collectAsState()
+    val inCaseTone by vm.inCaseTone.collectAsState()
+    val headTrackingOn by vm.headTracking.collectAsState()
+    val chimeVolume by vm.chimeVolume.collectAsState()
+    val stemAction by vm.stemAction.collectAsState()
 
     Column(
         modifier = Modifier
@@ -284,7 +231,7 @@ fun DashboardScreen(service: AirPodsService) {
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
             modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
 
-        AncSegmentedControl(currentMode = ancMode, onModeChange = { service.setNoiseControlMode(it) })
+        AncSegmentedControl(currentMode = ancMode, onModeChange = { vm.setNoiseControlMode(it) })
 
         Spacer(Modifier.height(20.dp))
 
@@ -299,7 +246,7 @@ fun DashboardScreen(service: AirPodsService) {
                 title = "Conversational Awareness",
                 subtitle = "Lower volume when you speak",
                 enabled = caEnabled,
-                onToggle = { caEnabled = it; saveBool("ca_enabled", it); service.setConversationalAwareness(it) }
+                onToggle = { vm.setConversationalAwareness(it) }
             )
 
             Divider()
@@ -309,7 +256,7 @@ fun DashboardScreen(service: AirPodsService) {
                 title = "Adaptive Volume",
                 subtitle = "Adjust to your environment",
                 enabled = avEnabled,
-                onToggle = { avEnabled = it; saveBool("av_enabled", it); service.setAdaptiveVolume(it) }
+                onToggle = { vm.setAdaptiveVolume(it) }
             )
 
             Divider()
@@ -319,7 +266,7 @@ fun DashboardScreen(service: AirPodsService) {
                 title = "Ear Detection",
                 subtitle = "Auto play/pause",
                 enabled = edEnabled,
-                onToggle = { edEnabled = it; saveBool("ed_enabled", it); service.setEarDetection(it) }
+                onToggle = { vm.setEarDetection(it) }
             )
         }
 
@@ -360,7 +307,7 @@ fun DashboardScreen(service: AirPodsService) {
                     currentName = deviceName ?: "AirPods Pro",
                     onDismiss = { showRenameDialog = false },
                     onRename = { newName ->
-                        service.renameAirPods(newName)
+                        vm.renameAirPods(newName)
                         showRenameDialog = false
                     }
                 )
@@ -375,7 +322,7 @@ fun DashboardScreen(service: AirPodsService) {
                 subtitle = "Head tracking for immersive sound",
                 enabled = headTrackingOn,
                 onToggle = {
-                    headTrackingOn = service.toggleHeadTracking()
+                onToggle = { vm.toggleHeadTracking() }
                     saveBool("head_tracking", headTrackingOn)
                 }
             )
@@ -409,7 +356,7 @@ fun DashboardScreen(service: AirPodsService) {
                         onValueChange = { chimeVolume = it },
                         onValueChangeFinished = {
                             prefs.edit().putFloat("chime_volume", chimeVolume).apply()
-                            service.setChimeVolume(chimeVolume.toInt())
+                        vm.setChimeVolume(chimeVolume)
                         },
                         valueRange = 0f..100f,
                         modifier = Modifier.fillMaxWidth(),
@@ -428,10 +375,7 @@ fun DashboardScreen(service: AirPodsService) {
                 title = "One Bud ANC",
                 subtitle = "Keep noise cancellation with one earbud",
                 enabled = oneBudAnc,
-                onToggle = {
-                    oneBudAnc = it; saveBool("one_bud_anc", it)
-                    service.transport.sendControlCommand(0x1B, if (it) 0x01 else 0x02)
-                }
+                onToggle = { vm.setOneBudAnc(it) }
             )
 
             Divider()
@@ -441,10 +385,7 @@ fun DashboardScreen(service: AirPodsService) {
                 title = "Volume Swipe",
                 subtitle = "Swipe stem to adjust volume",
                 enabled = volumeSwipe,
-                onToggle = {
-                    volumeSwipe = it; saveBool("volume_swipe", it)
-                    service.transport.sendControlCommand(0x25, if (it) 0x01 else 0x02)
-                }
+                onToggle = { vm.setVolumeSwipe(it) }
             )
 
             Divider()
@@ -454,10 +395,7 @@ fun DashboardScreen(service: AirPodsService) {
                 title = "Sleep Detection",
                 subtitle = "Auto-pause when you fall asleep",
                 enabled = sleepDetection,
-                onToggle = {
-                    sleepDetection = it; saveBool("sleep_detection", it)
-                    service.transport.sendControlCommand(0x35, if (it) 0x01 else 0x02)
-                }
+                onToggle = { vm.setSleepDetection(it) }
             )
 
             Divider()
@@ -467,10 +405,7 @@ fun DashboardScreen(service: AirPodsService) {
                 title = "In-Case Tone",
                 subtitle = "Sound when placing buds in case",
                 enabled = inCaseTone,
-                onToggle = {
-                    inCaseTone = it; saveBool("in_case_tone", it)
-                    service.transport.sendControlCommand(0x31, if (it) 0x01 else 0x02)
-                }
+                onToggle = { vm.setInCaseTone(it) }
             )
 
             Divider()
@@ -491,11 +426,8 @@ fun DashboardScreen(service: AirPodsService) {
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
                 }
                 androidx.compose.material3.TextButton(onClick = {
-                    stemAction = if (stemAction == "Noise Control") "Off" else "Noise Control"
-                    prefs.edit().putString("stem_action", stemAction).apply()
-                    service.transport.sendControlCommand(0x16,
-                        if (stemAction == "Noise Control") 0x01 else 0x00,
-                        if (stemAction == "Noise Control") 0x01 else 0x00)
+                    val newAction = if (stemAction == "Noise Control") "Off" else "Noise Control"
+                    vm.setStemAction(newAction)
                 }) {
                     Text(if (stemAction == "Noise Control") "Set to Off" else "Set to Noise Control",
                         style = MaterialTheme.typography.labelMedium,
@@ -512,7 +444,6 @@ fun DashboardScreen(service: AirPodsService) {
             modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
 
         SectionCard {
-            val connectedAddr = service.transport.connectionState.collectAsState().value
             InfoRow("Model", deviceName ?: "AirPods Pro")
             Divider()
             InfoRow("Connection", "AACP over L2CAP (PSM 0x1001)")
@@ -747,9 +678,9 @@ fun SectionCard(content: @Composable () -> Unit) {
 // ═══════════════════════════════════════════════════════════════
 
 @Composable
-fun ConnectingScreen(service: AirPodsService, state: AacpTransport.ConnectionState) {
-    val deviceName by service.bondedDeviceName.collectAsState()
-    val error by service.transport.connectionError.collectAsState()
+fun ConnectingScreen(vm: AirPodsViewModel, state: AacpTransport.ConnectionState) {
+    val deviceName by vm.bondedDeviceName.collectAsState()
+    val error by vm.connectionError.collectAsState()
 
     Column(
         modifier = Modifier
@@ -793,10 +724,10 @@ fun ConnectingScreen(service: AirPodsService, state: AacpTransport.ConnectionSta
 
 @SuppressLint("MissingPermission")
 @Composable
-fun DevicePickerScreen(service: AirPodsService) {
-    val bondedDevices by service.bondedAirPodsList.collectAsState()
-    val deviceName by service.bondedDeviceName.collectAsState()
-    val error by service.transport.connectionError.collectAsState()
+fun DevicePickerScreen(vm: AirPodsViewModel) {
+    val bondedDevices by vm.bondedAirPodsList.collectAsState()
+    val deviceName by vm.bondedDeviceName.collectAsState()
+    val error by vm.connectionError.collectAsState()
 
     Column(
         modifier = Modifier
@@ -842,7 +773,7 @@ fun DevicePickerScreen(service: AirPodsService) {
                         textAlign = TextAlign.Center)
                     Spacer(Modifier.height(24.dp))
                     Button(
-                        onClick = { service.autoConnect() },
+                        onClick = { vm.autoConnect() },
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text("Retry", style = MaterialTheme.typography.labelLarge, color = Color.White)
@@ -860,7 +791,7 @@ fun DevicePickerScreen(service: AirPodsService) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { service.connectToSpecificDevice(airpods.device) }
+                            .clickable { vm.connectToDevice(airpods.device) }
                             .padding(vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -908,7 +839,7 @@ fun DevicePickerScreen(service: AirPodsService) {
 
             // Retry button at bottom
             Button(
-                onClick = { service.autoConnect() },
+                onClick = { vm.autoConnect() },
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(

@@ -132,7 +132,7 @@ me.arnabsaha.airpodscompanion/
 
 ## Credits
 
-Protocol reverse engineering based on the [LibrePods](https://github.com/kavishdevar/LibrePods) project by kavishdevar. AirBridge is a from-scratch reimplementation targeting modern Android with Jetpack Compose.
+Protocol reverse engineering based on the [LibrePods](https://github.com/kavishdevar/LibrePods) project by kavishdevar.
 
 ## License
 

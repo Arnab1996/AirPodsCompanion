@@ -178,7 +178,8 @@ fun MainScreen(service: AirPodsService?, bindService: () -> Unit, unbindService:
             val connState by service.connectionState.collectAsState()
             when (connState) {
                 AacpTransport.ConnectionState.CONNECTED -> DashboardScreen(service)
-                AacpTransport.ConnectionState.DISCONNECTED -> DevicePickerScreen(service)
+                AacpTransport.ConnectionState.DISCONNECTED,
+                AacpTransport.ConnectionState.FAILED -> DevicePickerScreen(service)
                 else -> ConnectingScreen(service, connState)
             }
         } else {
@@ -511,13 +512,12 @@ fun DashboardScreen(service: AirPodsService) {
             modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
 
         SectionCard {
-            InfoRow("Model", "AirPods Pro 2 (USB-C)")
+            val connectedAddr = service.transport.connectionState.collectAsState().value
+            InfoRow("Model", deviceName ?: "AirPods Pro")
             Divider()
-            InfoRow("Firmware", "7B20 / MPMP")
+            InfoRow("Connection", "AACP over L2CAP (PSM 0x1001)")
             Divider()
-            InfoRow("Bluetooth Address", "14:14:7D:EB:E0:65")
-            Divider()
-            InfoRow("Protocol", "AACP over L2CAP (PSM 0x1001)")
+            InfoRow("App Version", "0.1.0")
         }
 
         Spacer(Modifier.height(32.dp))
@@ -678,33 +678,6 @@ fun IconToggleRow(
 }
 
 @Composable
-fun ToggleRow(title: String, subtitle: String, enabled: Boolean, onToggle: (Boolean) -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onToggle(!enabled) }
-            .padding(vertical = 14.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
-        }
-        androidx.compose.material3.Switch(
-            checked = enabled,
-            onCheckedChange = onToggle,
-            colors = androidx.compose.material3.SwitchDefaults.colors(
-                checkedTrackColor = AppleGreen,
-                checkedThumbColor = Color.White
-            )
-        )
-    }
-}
-
-@Composable
 fun Divider() {
     Box(
         Modifier
@@ -776,6 +749,7 @@ fun SectionCard(content: @Composable () -> Unit) {
 @Composable
 fun ConnectingScreen(service: AirPodsService, state: AacpTransport.ConnectionState) {
     val deviceName by service.bondedDeviceName.collectAsState()
+    val error by service.transport.connectionError.collectAsState()
 
     Column(
         modifier = Modifier
@@ -802,6 +776,14 @@ fun ConnectingScreen(service: AirPodsService, state: AacpTransport.ConnectionSta
                 style = MaterialTheme.typography.bodySmall,
                 color = AppleOrange)
         }
+        if (error != null) {
+            Spacer(Modifier.height(12.dp))
+            Text(error ?: "",
+                style = MaterialTheme.typography.bodySmall,
+                color = AppleRed,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 32.dp))
+        }
     }
 }
 
@@ -814,6 +796,7 @@ fun ConnectingScreen(service: AirPodsService, state: AacpTransport.ConnectionSta
 fun DevicePickerScreen(service: AirPodsService) {
     val bondedDevices by service.bondedAirPodsList.collectAsState()
     val deviceName by service.bondedDeviceName.collectAsState()
+    val error by service.transport.connectionError.collectAsState()
 
     Column(
         modifier = Modifier
@@ -913,6 +896,15 @@ fun DevicePickerScreen(service: AirPodsService) {
             }
 
             Spacer(Modifier.weight(1f))
+
+            // Error message
+            if (error != null) {
+                SectionCard {
+                    Text(error ?: "", style = MaterialTheme.typography.bodySmall,
+                        color = AppleRed, modifier = Modifier.padding(4.dp))
+                }
+                Spacer(Modifier.height(10.dp))
+            }
 
             // Retry button at bottom
             Button(

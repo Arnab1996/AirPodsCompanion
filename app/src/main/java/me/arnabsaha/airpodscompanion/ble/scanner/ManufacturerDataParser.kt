@@ -123,35 +123,4 @@ class ManufacturerDataParser {
             rawManufacturerData = manufacturerData
         )
     }
-
-    /**
-     * Extract Apple manufacturer data from a raw BLE scan record.
-     * Walks the AD structure to find type 0xFF with company ID 0x004C.
-     *
-     * @return The manufacturer data bytes AFTER the company ID, or null if not found.
-     */
-    fun extractAppleDataFromScanRecord(scanRecord: ByteArray): ByteArray? {
-        var i = 0
-        while (i < scanRecord.size - 1) {
-            val adLength = scanRecord[i].toInt() and 0xFF
-            if (adLength == 0) break
-            if (i + adLength >= scanRecord.size) break
-
-            val adType = scanRecord[i + 1].toInt() and 0xFF
-
-            // 0xFF = Manufacturer Specific Data
-            if (adType == 0xFF && adLength >= 4) {
-                // Company ID is little-endian: 0x4C 0x00 = Apple
-                val companyId = (scanRecord[i + 2].toInt() and 0xFF) or
-                    ((scanRecord[i + 3].toInt() and 0xFF) shl 8)
-
-                if (companyId == AppleBleConstants.APPLE_COMPANY_ID) {
-                    // Return data after the 2-byte company ID
-                    return scanRecord.copyOfRange(i + 4, i + 1 + adLength)
-                }
-            }
-            i += adLength + 1
-        }
-        return null
-    }
 }

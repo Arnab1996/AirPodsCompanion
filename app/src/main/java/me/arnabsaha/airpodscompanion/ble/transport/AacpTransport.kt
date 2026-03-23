@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import me.arnabsaha.airpodscompanion.protocol.aap.AacpPacketCodec
 import me.arnabsaha.airpodscompanion.protocol.aap.AacpPacketCodec.AacpPacket
@@ -28,16 +30,7 @@ import java.io.OutputStream
 
 /**
  * Manages the L2CAP connection to AirPods and handles the AACP protocol.
- *
- * Connection sequence (from LibrePods reverse engineering):
- * 1. Create L2CAP socket (PSM 0x1001)
- * 2. Connect socket
- * 3. Send handshake: 00 00 04 00 01 00 02 00 00 00 00 00 00 00 00 00
- * 4. Send SET_FEATURE_FLAGS: 04 00 04 00 4D 00 D7 00 00 00 00 00 00 00
- * 5. Send REQUEST_NOTIFICATIONS: 04 00 04 00 0F 00 FF FF FF FF
- * 6. Send PROXIMITY_KEYS_REQ: 04 00 04 00 30 00 05 00
- * 7. Send EQ_ENABLE: 04 00 04 00 29 00 00 FF FF FF FF FF FF FF FF
- * 8. Enter read loop — parse incoming AACP packets
+ * Thread-safe: all socket mutations are protected by a Mutex.
  */
 class AacpTransport {
 
@@ -50,12 +43,11 @@ class AacpTransport {
     }
 
     enum class ConnectionState {
-        DISCONNECTED,
-        CONNECTING,
-        HANDSHAKING,
-        CONNECTED,
-        RECONNECTING
+        DISCONNECTED, CONNECTING, HANDSHAKING, CONNECTED, RECONNECTING, FAILED
     }
+
+    // Thread safety: protects socket, streams, and state transitions
+    private val socketMutex = Mutex()
 
     private var supervisorJob = SupervisorJob()
     private var scope = CoroutineScope(Dispatchers.IO + supervisorJob)
@@ -67,24 +59,20 @@ class AacpTransport {
     private var outputStream: OutputStream? = null
     private var connectedDevice: BluetoothDevice? = null
 
-    // Connection state
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
-    // Incoming packets
+    private val _connectionError = MutableStateFlow<String?>(null)
+    val connectionError: StateFlow<String?> = _connectionError.asStateFlow()
+
     private val _incomingPackets = MutableSharedFlow<AacpPacket>(extraBufferCapacity = 128)
     val incomingPackets: SharedFlow<AacpPacket> = _incomingPackets.asSharedFlow()
 
-    // Debug: raw bytes for packet log
     private val _rawPacketLog = MutableSharedFlow<Pair<Boolean, ByteArray>>(extraBufferCapacity = 256)
     val rawPacketLog: SharedFlow<Pair<Boolean, ByteArray>> = _rawPacketLog.asSharedFlow()
 
-    val isConnected: Boolean
-        get() = _connectionState.value == ConnectionState.CONNECTED
+    val isConnected: Boolean get() = _connectionState.value == ConnectionState.CONNECTED
 
-    /**
-     * Connect to an AirPods device and perform the AACP handshake.
-     */
     @SuppressLint("MissingPermission")
     fun connect(device: BluetoothDevice) {
         if (_connectionState.value == ConnectionState.CONNECTING ||
@@ -95,82 +83,82 @@ class AacpTransport {
 
         connectedDevice = device
         _connectionState.value = ConnectionState.CONNECTING
+        _connectionError.value = null
 
         scope.launch {
             try {
-                Log.d(TAG, "Creating L2CAP socket to ${device.address}...")
-                val sock = L2capSocketFactory.createL2capSocket(device)
-                if (sock == null) {
-                    Log.e(TAG, "Failed to create socket")
-                    _connectionState.value = ConnectionState.DISCONNECTED
+                socketMutex.withLock {
+                    Log.d(TAG, "Creating L2CAP socket to ${device.address}...")
+                    val sock = L2capSocketFactory.createL2capSocket(device)
+                    if (sock == null) {
+                        Log.e(TAG, "Failed to create socket")
+                        _connectionError.value = "Failed to create Bluetooth socket"
+                        _connectionState.value = ConnectionState.FAILED
+                        return@withLock
+                    }
+
+                    Log.d(TAG, "Connecting socket (timeout ${CONNECT_TIMEOUT_MS}ms)...")
+                    try {
+                        withTimeout(CONNECT_TIMEOUT_MS) { sock.connect() }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Socket connect timeout/failed: ${e.message}")
+                        sock.close()
+                        _connectionError.value = "Connection timed out. Make sure AirPods are nearby."
+                        _connectionState.value = ConnectionState.FAILED
+                        return@withLock
+                    }
+
+                    socket = sock
+                    inputStream = sock.inputStream
+                    outputStream = sock.outputStream
+                }
+
+                if (_connectionState.value == ConnectionState.FAILED) {
+                    scheduleReconnect()
                     return@launch
                 }
 
-                socket = sock
-
-                Log.d(TAG, "Connecting socket (timeout ${CONNECT_TIMEOUT_MS}ms)...")
-                withTimeout(CONNECT_TIMEOUT_MS) {
-                    sock.connect()
-                }
-
-                inputStream = sock.inputStream
-                outputStream = sock.outputStream
-
                 Log.d(TAG, "Socket connected, starting AACP handshake...")
                 _connectionState.value = ConnectionState.HANDSHAKING
-
                 performHandshake()
-
                 _connectionState.value = ConnectionState.CONNECTED
                 Log.d(TAG, "AACP handshake complete — fully connected")
-
                 startReadLoop()
             } catch (e: IOException) {
                 Log.e(TAG, "Connection failed: ${e.message}")
-                closeSocket()
+                _connectionError.value = "Connection failed: ${e.message}"
+                closeSocketInternal()
                 _connectionState.value = ConnectionState.DISCONNECTED
                 scheduleReconnect()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Unexpected error: ${e.message}", e)
+                _connectionError.value = "Unexpected error: ${e.message}"
+                closeSocketInternal()
+                _connectionState.value = ConnectionState.FAILED
             }
         }
     }
 
-    /**
-     * Perform the AACP initialization handshake.
-     * Sends the required packets in sequence with small delays.
-     */
     private suspend fun performHandshake() {
-        // Step 1: Handshake
-        sendRaw(AacpConstants.HANDSHAKE)
+        sendRawDirect(AacpConstants.HANDSHAKE)
         delay(100)
-
-        // Step 2: Set feature flags (enables Adaptive Transparency, CA during audio)
-        sendRaw(AacpConstants.SET_FEATURE_FLAGS)
+        sendRawDirect(AacpConstants.SET_FEATURE_FLAGS)
         delay(100)
-
-        // Step 3: Request all notifications
-        sendRaw(AacpConstants.REQUEST_NOTIFICATIONS)
+        sendRawDirect(AacpConstants.REQUEST_NOTIFICATIONS)
         delay(100)
-
-        // Step 4: Request proximity keys (IRK + ENC_KEY)
-        sendRaw(AacpConstants.REQUEST_PROXIMITY_KEYS)
+        sendRawDirect(AacpConstants.REQUEST_PROXIMITY_KEYS)
         delay(100)
-
-        // Step 5: Enable EQ
-        sendRaw(AacpConstants.ENABLE_EQ)
-
+        sendRawDirect(AacpConstants.ENABLE_EQ)
         Log.d(TAG, "Handshake sequence complete (5 packets sent)")
     }
 
-    /**
-     * Send a pre-built raw byte array to the AirPods.
-     */
+    /** Thread-safe send — serialized via mutex */
     fun sendRaw(data: ByteArray) {
         scope.launch {
             try {
-                outputStream?.write(data)
-                outputStream?.flush()
-                _rawPacketLog.tryEmit(Pair(true, data.clone())) // true = outgoing
-                Log.d(TAG, "TX: ${AacpPacketCodec.toHex(data)}")
+                sendRawDirect(data)
             } catch (e: IOException) {
                 Log.e(TAG, "Send failed: ${e.message}")
                 handleDisconnect()
@@ -178,56 +166,47 @@ class AacpTransport {
         }
     }
 
-    /**
-     * Send a control command (opcode 0x09).
-     * Format: [HEADER] [0x09] [0x00] [commandId] [values...]
-     */
+    /** Direct send without launching a new coroutine — used during handshake */
+    private suspend fun sendRawDirect(data: ByteArray) {
+        socketMutex.withLock {
+            val os = outputStream ?: throw IOException("Output stream is null")
+            os.write(data)
+            os.flush()
+        }
+        _rawPacketLog.tryEmit(Pair(true, data.clone()))
+        Log.d(TAG, "TX: ${AacpPacketCodec.toHex(data)}")
+    }
+
     fun sendControlCommand(commandId: Byte, vararg values: Byte) {
         sendRaw(AacpPacketCodec.encodeControlCommand(commandId, *values))
     }
 
-    /**
-     * Send a generic AACP packet with the given opcode and payload.
-     */
     fun sendPacket(opcode: Byte, payload: ByteArray = ByteArray(0)) {
         sendRaw(AacpPacketCodec.encodePacket(opcode, payload))
     }
 
-    /**
-     * Start the read loop that continuously reads from the socket
-     * and emits decoded packets.
-     */
     private fun startReadLoop() {
         readJob?.cancel()
         readJob = scope.launch {
             val buffer = ByteArray(READ_BUFFER_SIZE)
             Log.d(TAG, "Read loop started")
 
-            while (isActive && socket?.isConnected == true) {
+            while (isActive) {
                 try {
-                    val bytesRead = inputStream?.read(buffer) ?: -1
+                    val stream = inputStream ?: break
+                    val bytesRead = stream.read(buffer)
                     if (bytesRead <= 0) {
                         Log.d(TAG, "Socket closed (read returned $bytesRead)")
                         break
                     }
 
                     val data = buffer.copyOf(bytesRead)
-                    _rawPacketLog.tryEmit(Pair(false, data.clone())) // false = incoming
-                    Log.d(TAG, "RX (${bytesRead}B): ${AacpPacketCodec.toHex(data)}")
+                    _rawPacketLog.tryEmit(Pair(false, data.clone()))
 
-                    // Decode and emit
-                    val packet = AacpPacketCodec.decode(data)
-                    if (packet != null) {
-                        _incomingPackets.tryEmit(packet)
-                    } else {
-                        // May be a multi-packet read or non-AACP data
-                        // Try to find AACP packets within the buffer
-                        parseMultiplePackets(data)
-                    }
+                    // Parse all packets from the buffer
+                    parsePacketsFromBuffer(data)
                 } catch (e: IOException) {
-                    if (isActive) {
-                        Log.e(TAG, "Read error: ${e.message}")
-                    }
+                    if (isActive) Log.e(TAG, "Read error: ${e.message}")
                     break
                 }
             }
@@ -237,53 +216,58 @@ class AacpTransport {
         }
     }
 
-    /**
-     * Handle cases where multiple AACP packets arrive in a single read.
-     * Scans the buffer for AACP headers and decodes each packet.
-     */
-    private fun parseMultiplePackets(data: ByteArray) {
+    /** Parse one or more AACP packets from a read buffer */
+    private fun parsePacketsFromBuffer(data: ByteArray) {
         var offset = 0
-        while (offset < data.size - 5) {
-            // Look for AACP header: 04 00 04 00
-            if (data[offset] == 0x04.toByte() && data[offset + 1] == 0x00.toByte() &&
-                data[offset + 2] == 0x04.toByte() && data[offset + 3] == 0x00.toByte()) {
+        while (offset < data.size - 4) {
+            // Look for AACP header: 04 00 04 00 or 00 00 04 00
+            val isDataHeader = data[offset] == 0x04.toByte() && data[offset + 1] == 0x00.toByte() &&
+                data[offset + 2] == 0x04.toByte() && data[offset + 3] == 0x00.toByte()
+            val isHandshakeHeader = data[offset] == 0x00.toByte() && data[offset + 1] == 0x00.toByte() &&
+                data[offset + 2] == 0x04.toByte() && data[offset + 3] == 0x00.toByte()
 
-                // Try to decode from this offset
+            if (isDataHeader || isHandshakeHeader) {
                 val remaining = data.copyOfRange(offset, data.size)
                 val packet = AacpPacketCodec.decode(remaining)
                 if (packet != null) {
                     _incomingPackets.tryEmit(packet)
+                    // Advance past this packet (header 4 + opcode 1 + secondary 1 + payload)
+                    offset += packet.rawBytes.size
+                    continue
                 }
             }
             offset++
         }
     }
 
-    /**
-     * Disconnect from the AirPods.
-     */
     fun disconnect() {
         Log.d(TAG, "Disconnecting...")
         reconnectJob?.cancel()
         readJob?.cancel()
-        closeSocket()
+        scope.launch {
+            socketMutex.withLock { closeSocketInternal() }
+        }
         connectedDevice = null
         _connectionState.value = ConnectionState.DISCONNECTED
+        _connectionError.value = null
         supervisorJob.cancel()
-        // Create fresh scope for potential reconnect
         supervisorJob = SupervisorJob()
         scope = CoroutineScope(Dispatchers.IO + supervisorJob)
     }
 
     private fun handleDisconnect() {
-        closeSocket()
-        if (_connectionState.value == ConnectionState.CONNECTED) {
+        scope.launch {
+            socketMutex.withLock { closeSocketInternal() }
+        }
+        if (_connectionState.value == ConnectionState.CONNECTED ||
+            _connectionState.value == ConnectionState.HANDSHAKING) {
             _connectionState.value = ConnectionState.DISCONNECTED
             scheduleReconnect()
         }
     }
 
-    private fun closeSocket() {
+    /** Must be called inside socketMutex or from disconnect() */
+    private fun closeSocketInternal() {
         try {
             inputStream?.close()
             outputStream?.close()
@@ -296,9 +280,6 @@ class AacpTransport {
         socket = null
     }
 
-    /**
-     * Schedule reconnection with exponential backoff.
-     */
     private fun scheduleReconnect() {
         val device = connectedDevice ?: return
 
@@ -309,20 +290,19 @@ class AacpTransport {
                 Log.d(TAG, "Reconnect attempt $attempt/$MAX_RECONNECT_ATTEMPTS in ${delayMs}ms")
                 _connectionState.value = ConnectionState.RECONNECTING
 
-                try {
-                    delay(delayMs)
-                } catch (e: CancellationException) {
-                    return@launch
-                }
-
+                try { delay(delayMs) } catch (e: CancellationException) { return@launch }
                 if (_connectionState.value == ConnectionState.CONNECTED) return@launch
 
                 try {
-                    val sock = L2capSocketFactory.createL2capSocket(device) ?: continue
-                    socket = sock
-                    sock.connect()
-                    inputStream = sock.inputStream
-                    outputStream = sock.outputStream
+                    socketMutex.withLock {
+                        val sock = L2capSocketFactory.createL2capSocket(device) ?: return@withLock
+                        withTimeout(CONNECT_TIMEOUT_MS) { sock.connect() }
+                        socket = sock
+                        inputStream = sock.inputStream
+                        outputStream = sock.outputStream
+                    }
+
+                    if (socket?.isConnected != true) continue
 
                     _connectionState.value = ConnectionState.HANDSHAKING
                     performHandshake()
@@ -330,14 +310,15 @@ class AacpTransport {
                     Log.d(TAG, "Reconnected on attempt $attempt")
                     startReadLoop()
                     return@launch
-                } catch (e: IOException) {
+                } catch (e: Exception) {
                     Log.w(TAG, "Reconnect attempt $attempt failed: ${e.message}")
-                    closeSocket()
+                    socketMutex.withLock { closeSocketInternal() }
                 }
             }
 
             Log.e(TAG, "All reconnect attempts exhausted")
-            _connectionState.value = ConnectionState.DISCONNECTED
+            _connectionError.value = "Could not reconnect after $MAX_RECONNECT_ATTEMPTS attempts"
+            _connectionState.value = ConnectionState.FAILED
         }
     }
 }

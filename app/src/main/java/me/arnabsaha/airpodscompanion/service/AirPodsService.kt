@@ -5,10 +5,13 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.media.AudioManager
 import android.os.Binder
 import android.os.Handler
@@ -88,6 +91,7 @@ class AirPodsService : Service() {
     private val binder = LocalBinder()
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
+    private val ioScope = CoroutineScope(Dispatchers.Default + serviceJob) // For head tracking processing
     private lateinit var scanner: AirPodsScanner
     private val handler = Handler(Looper.getMainLooper())
 
@@ -141,6 +145,26 @@ class AirPodsService : Service() {
 
     override fun onBind(intent: Intent?): IBinder = binder
 
+    // Bluetooth state receiver — handles BT toggle on/off gracefully
+    private val bluetoothStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action != BluetoothAdapter.ACTION_STATE_CHANGED) return
+            val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+            when (state) {
+                BluetoothAdapter.STATE_OFF -> {
+                    Log.d(TAG, "Bluetooth turned OFF")
+                    scanner.stopScan()
+                    _transport.disconnect()
+                }
+                BluetoothAdapter.STATE_ON -> {
+                    Log.d(TAG, "Bluetooth turned ON — restarting")
+                    scanner.startScan()
+                    handler.postDelayed({ autoConnect() }, 2000) // Delay for BT stack to initialize
+                }
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "Service created")
@@ -148,6 +172,9 @@ class AirPodsService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification("Scanning for AirPods..."))
 
         connectionPopup = ConnectionPopup(this)
+
+        // Register BT state receiver
+        registerReceiver(bluetoothStateReceiver, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED))
 
         scanner = AirPodsScanner(this)
         scanner.startScan()
@@ -172,8 +199,10 @@ class AirPodsService : Service() {
         Log.d(TAG, "Service destroyed")
         handler.removeCallbacksAndMessages(null)
         serviceJob.cancel()
+        connectionPopup.dismiss()
+        try { unregisterReceiver(bluetoothStateReceiver) } catch (_: Exception) {}
         scanner.stopScan()
-        transport.disconnect()
+        _transport.disconnect()
         super.onDestroy()
     }
 
@@ -453,6 +482,7 @@ class AirPodsService : Service() {
                         } else "Connected to ${_bondedDeviceName.value ?: "AirPods"}"
                     }
                     AacpTransport.ConnectionState.RECONNECTING -> "Reconnecting..."
+                    AacpTransport.ConnectionState.FAILED -> "Connection failed"
                 }
                 updateNotification(text)
             }
@@ -464,7 +494,7 @@ class AirPodsService : Service() {
      * This is the core event loop that makes battery, ANC, ear detection, etc. work.
      */
     private fun startPacketDispatcher() {
-        serviceScope.launch {
+        ioScope.launch {
             _transport.incomingPackets.collect { packet ->
                 try {
                     dispatchPacket(packet)

@@ -41,6 +41,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.BluetoothSearching
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
@@ -80,6 +81,8 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -128,11 +131,14 @@ fun MainScreen(vm: AirPodsViewModel) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) listOf(
             "android.permission.BLUETOOTH_CONNECT", "android.permission.BLUETOOTH_SCAN",
             "android.permission.BLUETOOTH", "android.permission.BLUETOOTH_ADMIN",
-            "android.permission.BLUETOOTH_ADVERTISE", "android.permission.POST_NOTIFICATIONS",
+            "android.permission.BLUETOOTH_ADVERTISE",
             "android.permission.READ_PHONE_STATE", "android.permission.ANSWER_PHONE_CALLS"
-        ) else listOf(
+        ) + if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            listOf("android.permission.POST_NOTIFICATIONS") else emptyList()
+        else listOf(
             "android.permission.BLUETOOTH", "android.permission.BLUETOOTH_ADMIN",
-            "android.permission.ACCESS_FINE_LOCATION", "android.permission.POST_NOTIFICATIONS"
+            "android.permission.ACCESS_FINE_LOCATION",
+            "android.permission.READ_PHONE_STATE"
         )
     )
 
@@ -469,7 +475,14 @@ fun BatteryGauge(label: String, level: Int, isCharging: Boolean) {
         animationSpec = tween(800), label = "battery"
     )
 
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    val accessLabel = "$label battery: ${if (displayLevel >= 0) "$displayLevel percent" else "unavailable"}${if (isCharging && displayLevel >= 0) ", charging" else ""}"
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.semantics(mergeDescendants = true) {
+            contentDescription = accessLabel
+        }
+    ) {
         Box(contentAlignment = Alignment.Center, modifier = Modifier.size(80.dp)) {
             androidx.compose.foundation.Canvas(modifier = Modifier.size(68.dp)) {
                 drawArc(Color.Gray.copy(alpha = 0.1f), -90f, 360f, false,
@@ -506,7 +519,12 @@ fun BatteryGauge(label: String, level: Int, isCharging: Boolean) {
 
 @Composable
 fun EarDot(label: String, inEar: Boolean) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.semantics(mergeDescendants = true) {
+            contentDescription = "$label earbud: ${if (inEar) "in ear" else "not in ear"}"
+        }
+    ) {
         Box(
             modifier = Modifier
                 .size(10.dp)
@@ -553,7 +571,7 @@ fun AncSegmentedControl(currentMode: Byte, onModeChange: (Byte) -> Unit) {
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
-                        opt.icon, null, Modifier.size(20.dp),
+                        opt.icon, opt.label, Modifier.size(20.dp),
                         tint = if (isSelected) Color.White
                             else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                     )
@@ -583,11 +601,14 @@ fun IconToggleRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .semantics(mergeDescendants = true) {
+                contentDescription = "$title: ${if (enabled) "enabled" else "disabled"}. $subtitle"
+            }
             .clickable { onToggle(!enabled) }
             .padding(vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, null, Modifier.size(20.dp),
+        Icon(icon, title, Modifier.size(20.dp),
             tint = if (enabled) MaterialTheme.colorScheme.primary
                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
         Spacer(Modifier.width(12.dp))

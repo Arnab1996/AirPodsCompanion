@@ -10,7 +10,7 @@ android {
 
     defaultConfig {
         applicationId = "me.arnabsaha.airpodscompanion"
-        minSdk = 33
+        minSdk = 29
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
@@ -63,4 +63,7 @@ dependencies {
 
     // Hidden API bypass (for L2CAP socket creation via reflection)
     implementation(libs.hiddenapibypass)
+
+    // Testing
+    testImplementation("junit:junit:4.13.2")
 }

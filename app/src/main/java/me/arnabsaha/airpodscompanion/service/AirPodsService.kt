@@ -58,6 +58,14 @@ data class EarState(
     val noneInEar: Boolean get() = !leftInEar && !rightInEar
 }
 
+/** Bonded AirPods device info for the device picker */
+data class BondedAirPods(
+    val name: String,
+    val address: String,
+    val device: BluetoothDevice,
+    val isCurrentlyConnected: Boolean = false
+)
+
 /**
  * Foreground service that runs the BLE scanner, maintains AirPods AACP connection,
  * and exposes StateFlows for the UI to observe.
@@ -102,8 +110,9 @@ class AirPodsService : Service() {
     private val _ancMode = MutableStateFlow<Byte>(0x01) // OFF by default
     val ancMode: StateFlow<Byte> = _ancMode.asStateFlow()
 
-    // Head gesture detector
-    val gestureDetector = HeadGestureDetector()
+    // List of all bonded AirPods devices
+    private val _bondedAirPodsList = MutableStateFlow<List<BondedAirPods>>(emptyList())
+    val bondedAirPodsList: StateFlow<List<BondedAirPods>> = _bondedAirPodsList.asStateFlow()
     private var headTrackingActive = false
     private var connectedBtDevice: BluetoothDevice? = null
 
@@ -140,6 +149,9 @@ class AirPodsService : Service() {
         startPruneLoop()
         observeConnectionState()
         startPacketDispatcher()
+
+        // Auto-connect to bonded AirPods on service start
+        autoConnect()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -165,55 +177,73 @@ class AirPodsService : Service() {
     // ═══════════════════════════════════════
 
     /**
-     * Find and connect to the bonded AirPods device.
-     *
-     * CRITICAL: AirPods must be paired via Android Bluetooth settings first.
-     * The BLE advertising address (rotating RPA) is NOT the bonded address.
-     * We search bondedDevices for a device with the AAP L2CAP UUID.
+     * Auto-connect: find all bonded AirPods, connect to the first available one.
+     * Called on service start — no user interaction needed.
+     */
+    @SuppressLint("MissingPermission")
+    fun autoConnect() {
+        if (_transport.isConnected) return
+
+        val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter ?: return
+        val aapUuid = android.os.ParcelUuid.fromString("74ec2172-0bad-4d01-8f77-997b2be0722a")
+
+        // Find ALL bonded AirPods
+        val airPodsList = mutableListOf<BondedAirPods>()
+        for (device in adapter.bondedDevices) {
+            val hasAapUuid = device.uuids?.contains(aapUuid) == true
+            val isAirPods = device.name?.contains("AirPods", ignoreCase = true) == true
+            if (hasAapUuid || isAirPods) {
+                airPodsList.add(BondedAirPods(
+                    name = device.name ?: "AirPods",
+                    address = device.address,
+                    device = device
+                ))
+                Log.d(TAG, "Found bonded AirPods: ${device.name} (${device.address})")
+            }
+        }
+
+        _bondedAirPodsList.value = airPodsList
+
+        if (airPodsList.isEmpty()) {
+            Log.d(TAG, "No bonded AirPods found")
+            updateNotification("Pair AirPods in Bluetooth settings")
+            return
+        }
+
+        // Connect to the first one (or the last-used one from prefs)
+        val prefs = getSharedPreferences("airbridge_settings", MODE_PRIVATE)
+        val lastAddress = prefs.getString("last_connected_address", null)
+        val target = airPodsList.find { it.address == lastAddress } ?: airPodsList.first()
+
+        connectToSpecificDevice(target.device)
+    }
+
+    /** Connect to a specific bonded AirPods device */
+    @SuppressLint("MissingPermission")
+    fun connectToSpecificDevice(device: BluetoothDevice) {
+        Log.d(TAG, "Connecting to: ${device.name} (${device.address})")
+        _bondedDeviceName.value = device.name ?: "AirPods"
+        connectedBtDevice = device
+        updateNotification("Connecting to ${device.name}...")
+
+        // Save as last connected
+        getSharedPreferences("airbridge_settings", MODE_PRIVATE)
+            .edit().putString("last_connected_address", device.address).apply()
+
+        // Update the bonded list with connection status
+        _bondedAirPodsList.value = _bondedAirPodsList.value.map {
+            it.copy(isCurrentlyConnected = it.address == device.address)
+        }
+
+        _transport.connect(device)
+    }
+
+    /**
+     * Legacy method — kept for backward compatibility but now just calls autoConnect.
      */
     @SuppressLint("MissingPermission")
     fun connectToDevice(bleAddress: String) {
-        val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
-        val adapter = bluetoothManager.adapter ?: run {
-            Log.e(TAG, "BluetoothAdapter is null")
-            return
-        }
-
-        // First: find bonded AirPods by UUID (use cached UUIDs, not async fetchUuidsWithSdp)
-        val aapUuid = android.os.ParcelUuid.fromString("74ec2172-0bad-4d01-8f77-997b2be0722a")
-        var bondedAirPods: BluetoothDevice? = null
-
-        for (device in adapter.bondedDevices) {
-            val uuids = device.uuids
-            if (uuids != null && uuids.contains(aapUuid)) {
-                Log.d(TAG, "Found bonded AirPods by UUID: ${device.name} (${device.address})")
-                bondedAirPods = device
-                break
-            }
-        }
-
-        // Fallback: try to find by name containing "AirPods"
-        if (bondedAirPods == null) {
-            bondedAirPods = adapter.bondedDevices.find {
-                it.name?.contains("AirPods", ignoreCase = true) == true
-            }
-            if (bondedAirPods != null) {
-                Log.d(TAG, "Found bonded AirPods by name: ${bondedAirPods.name} (${bondedAirPods.address})")
-            }
-        }
-
-        if (bondedAirPods == null) {
-            Log.e(TAG, "No bonded AirPods found! Pair them in Android Bluetooth settings first.")
-            Log.e(TAG, "Bonded devices: ${adapter.bondedDevices.map { "${it.name}(${it.address})" }}")
-            updateNotification("Pair AirPods in Bluetooth settings first")
-            return
-        }
-
-        Log.d(TAG, "Initiating AACP connection to bonded device: ${bondedAirPods.name} (${bondedAirPods.address})")
-        _bondedDeviceName.value = bondedAirPods.name ?: "AirPods"
-        connectedBtDevice = bondedAirPods
-        updateNotification("Connecting to ${bondedAirPods.name}...")
-        _transport.connect(bondedAirPods)
+        autoConnect()
     }
 
     /** Set noise control mode: OFF, ANC, TRANSPARENCY, ADAPTIVE */

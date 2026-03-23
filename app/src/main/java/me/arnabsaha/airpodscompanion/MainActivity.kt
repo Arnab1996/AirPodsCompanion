@@ -97,6 +97,7 @@ import me.arnabsaha.airpodscompanion.ble.transport.AacpTransport
 import me.arnabsaha.airpodscompanion.protocol.constants.NoiseControlMode
 import me.arnabsaha.airpodscompanion.service.AacpBatteryState
 import me.arnabsaha.airpodscompanion.service.AirPodsService
+import me.arnabsaha.airpodscompanion.service.BondedAirPods
 import me.arnabsaha.airpodscompanion.service.EarState
 import me.arnabsaha.airpodscompanion.ui.composables.ConnectionAnimation
 import me.arnabsaha.airpodscompanion.ui.theme.AirPodsCompanionTheme
@@ -175,10 +176,10 @@ fun MainScreen(service: AirPodsService?, bindService: () -> Unit, unbindService:
 
         if (service != null) {
             val connState by service.connectionState.collectAsState()
-            if (connState == AacpTransport.ConnectionState.CONNECTED) {
-                DashboardScreen(service)
-            } else {
-                ScannerScreen(service)
+            when (connState) {
+                AacpTransport.ConnectionState.CONNECTED -> DashboardScreen(service)
+                AacpTransport.ConnectionState.DISCONNECTED -> DevicePickerScreen(service)
+                else -> ConnectingScreen(service, connState)
             }
         } else {
             LoadingScreen()
@@ -769,18 +770,50 @@ fun SectionCard(content: @Composable () -> Unit) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Scanner Screen (shown before AACP connection)
+// Connecting Screen (shown during AACP handshake)
 // ═══════════════════════════════════════════════════════════════
 
 @Composable
-fun ScannerScreen(service: AirPodsService) {
-    val devices by service.detectedDevices.collectAsState()
-    val connState by service.connectionState.collectAsState()
+fun ConnectingScreen(service: AirPodsService, state: AacpTransport.ConnectionState) {
     val deviceName by service.bondedDeviceName.collectAsState()
 
-    val pulse = rememberInfiniteTransition(label = "pulse")
-    val pulseAlpha by pulse.animateFloat(0.3f, 1f,
-        infiniteRepeatable(tween(1000), RepeatMode.Reverse), label = "a")
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .windowInsetsPadding(WindowInsets.statusBars),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        ConnectionAnimation(
+            isConnecting = state == AacpTransport.ConnectionState.CONNECTING ||
+                           state == AacpTransport.ConnectionState.HANDSHAKING,
+            isConnected = false
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = deviceName ?: "AirPods",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
+        )
+        if (state == AacpTransport.ConnectionState.RECONNECTING) {
+            Spacer(Modifier.height(8.dp))
+            Text("Connection lost, reconnecting...",
+                style = MaterialTheme.typography.bodySmall,
+                color = AppleOrange)
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Device Picker Screen (shown when disconnected — lists bonded AirPods)
+// ═══════════════════════════════════════════════════════════════
+
+@SuppressLint("MissingPermission")
+@Composable
+fun DevicePickerScreen(service: AirPodsService) {
+    val bondedDevices by service.bondedAirPodsList.collectAsState()
+    val deviceName by service.bondedDeviceName.collectAsState()
 
     Column(
         modifier = Modifier
@@ -800,158 +833,100 @@ fun ScannerScreen(service: AirPodsService) {
         }
 
         Spacer(Modifier.height(4.dp))
+        Text("Not connected", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f))
 
-        // Status row
-        Row(verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(8.dp).clip(CircleShape)
-                    .background(AppleGreen.copy(alpha = pulseAlpha)))
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    if (devices.isEmpty()) "Scanning..."
-                    else "${devices.size} device${if (devices.size > 1) "s" else ""} found",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
-                )
-            }
-            if (connState != AacpTransport.ConnectionState.DISCONNECTED) {
-                val (txt, col) = when (connState) {
-                    AacpTransport.ConnectionState.CONNECTING -> "Connecting" to AppleOrange
-                    AacpTransport.ConnectionState.HANDSHAKING -> "Handshaking" to AppleOrange
-                    AacpTransport.ConnectionState.RECONNECTING -> "Reconnecting" to AppleRed
-                    else -> "" to Color.Gray
-                }
-                if (txt.isNotEmpty()) StatusChip(txt, col)
-            }
-        }
+        Spacer(Modifier.height(32.dp))
 
-        Spacer(Modifier.height(24.dp))
-
-        if (devices.isEmpty()) {
-            // Empty state with AirPods case image
+        if (bondedDevices.isEmpty()) {
+            // No bonded AirPods — show setup instructions
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    val caseScale by pulse.animateFloat(0.95f, 1.05f,
-                        infiniteRepeatable(tween(1500), RepeatMode.Reverse), label = "case")
-
                     androidx.compose.foundation.Image(
                         painter = androidx.compose.ui.res.painterResource(R.drawable.airpods_case),
-                        contentDescription = "AirPods Case",
-                        modifier = Modifier
-                            .size(160.dp)
-                            .scale(caseScale)
-                            .clip(RoundedCornerShape(24.dp)),
+                        contentDescription = "AirPods",
+                        modifier = Modifier.size(140.dp).clip(RoundedCornerShape(24.dp)),
                         contentScale = androidx.compose.ui.layout.ContentScale.Fit
                     )
                     Spacer(Modifier.height(24.dp))
-                    Text("Open your AirPods case lid",
+                    Text("Pair your AirPods first",
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f))
-                    Spacer(Modifier.height(4.dp))
-                    Text("Make sure Bluetooth is enabled",
+                    Spacer(Modifier.height(8.dp))
+                    Text("Go to Android Settings → Bluetooth\nHold the case button until LED flashes white",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f))
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
+                        textAlign = TextAlign.Center)
+                    Spacer(Modifier.height(24.dp))
+                    Button(
+                        onClick = { service.autoConnect() },
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Retry", style = MaterialTheme.typography.labelLarge, color = Color.White)
+                    }
                 }
             }
         } else {
-            val sortedDevices = remember(devices) {
-                devices.values.sortedByDescending { it.rssi }
-            }
-            Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                sortedDevices.forEach { ad ->
-                    AirPodsCard(
-                        ad = ad, deviceName = deviceName, connState = connState,
-                        onConnect = { service.connectToDevice(ad.address) }
-                    )
+            // Show bonded AirPods devices
+            Text("Your AirPods", style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+                modifier = Modifier.padding(bottom = 10.dp))
+
+            bondedDevices.forEach { airpods ->
+                SectionCard {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { service.connectToSpecificDevice(airpods.device) }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // AirPods icon
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.HeadsetMic, null, Modifier.size(28.dp),
+                                tint = MaterialTheme.colorScheme.primary)
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(airpods.name,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface)
+                            Text(airpods.address,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f))
+                        }
+                        if (airpods.isCurrentlyConnected) {
+                            StatusChip("Active", AppleGreen)
+                        } else {
+                            Text("Connect", style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
                 }
+                Spacer(Modifier.height(10.dp))
             }
-        }
-        Spacer(Modifier.height(16.dp))
-    }
-}
 
-@Composable
-fun AirPodsCard(
-    ad: me.arnabsaha.airpodscompanion.ble.scanner.AirPodsAdvertisement,
-    deviceName: String?,
-    connState: AacpTransport.ConnectionState,
-    onConnect: () -> Unit
-) {
-    SectionCard {
-        // Connection animation when connecting
-        if (connState == AacpTransport.ConnectionState.CONNECTING ||
-            connState == AacpTransport.ConnectionState.HANDSHAKING) {
-            ConnectionAnimation(
-                isConnecting = true,
-                isConnected = false,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-        }
+            Spacer(Modifier.weight(1f))
 
-        Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.HeadsetMic, null, Modifier.size(24.dp),
-                    tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(8.dp))
-                Column {
-                    Text(deviceName ?: ad.modelName,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface)
-                    Text("${ad.rssi} dBm", style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
-                }
+            // Retry button at bottom
+            Button(
+                onClick = { service.autoConnect() },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Text("Connect", style = MaterialTheme.typography.labelLarge, color = Color.White)
             }
+            Spacer(Modifier.height(20.dp))
         }
-
-        Spacer(Modifier.height(12.dp))
-
-        Row(Modifier.fillMaxWidth(), Arrangement.SpaceEvenly) {
-            MiniGauge("L", ad.leftBattery, ad.isLeftCharging)
-            MiniGauge("R", ad.rightBattery, ad.isRightCharging)
-            MiniGauge("Case", ad.caseBattery, ad.isCaseCharging)
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        // Status chips
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (ad.isLidOpen) StatusChip("Lid Open", AppleGreen)
-            if (ad.isInCase) StatusChip("In Case", Color(0xFF5AC8FA))
-            if (ad.isPaired) StatusChip("Paired", Color(0xFFAF52DE))
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        Button(
-            onClick = onConnect,
-            modifier = Modifier.fillMaxWidth().height(44.dp),
-            enabled = connState == AacpTransport.ConnectionState.DISCONNECTED,
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-            shape = RoundedCornerShape(10.dp)
-        ) {
-            Text(when (connState) {
-                AacpTransport.ConnectionState.CONNECTED -> "Connected"
-                AacpTransport.ConnectionState.CONNECTING,
-                AacpTransport.ConnectionState.HANDSHAKING -> "Connecting..."
-                AacpTransport.ConnectionState.RECONNECTING -> "Reconnecting..."
-                else -> "Connect"
-            }, style = MaterialTheme.typography.labelLarge, color = Color.White)
-        }
-    }
-}
-
-@Composable
-fun MiniGauge(label: String, level: Int, charging: Boolean) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(if (level >= 0) "$level%" else "--",
-            style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface)
-        Text(label, style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
-        if (charging) Text("⚡", fontSize = 10.sp)
     }
 }
 

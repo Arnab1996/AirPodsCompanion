@@ -341,8 +341,13 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
                     service.setEarDetection(_edEnabled.value)
                     service.transport.sendControlCommand(0x1B, if (_oneBudAnc.value) 0x01 else 0x02)
                     service.transport.sendControlCommand(0x25, if (_volumeSwipe.value) 0x01 else 0x02)
+                    service.transport.sendControlCommand(0x35, if (_sleepDetection.value) 0x01 else 0x02)
+                    service.transport.sendControlCommand(0x31, if (_inCaseTone.value) 0x01 else 0x02)
+                    service.transport.sendControlCommand(0x16,
+                        if (_stemAction.value == "Noise Control") 0x01 else 0x00,
+                        if (_stemAction.value == "Noise Control") 0x01 else 0x00)
                     service.setChimeVolume(_chimeVolume.value.toInt())
-                    Log.d(TAG, "Saved settings applied to service")
+                    Log.d(TAG, "All saved settings applied to service")
                     return@collect // Only apply once per connection
                 }
             }

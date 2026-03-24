@@ -457,6 +457,34 @@ fun DashboardScreen(vm: AirPodsViewModel) {
             InfoRow("Protocol", "AACP / L2CAP")
             Divider()
             InfoRow("Version", "0.1.0")
+            Divider()
+
+            // Overlay permission shortcut
+            val context = LocalContext.current
+            val hasOverlay = android.provider.Settings.canDrawOverlays(context)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        context.startActivity(
+                            Intent(
+                                android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                "package:${context.packageName}".toUri()
+                            )
+                        )
+                    }
+                    .padding(vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Popup Overlay", style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                Text(
+                    if (hasOverlay) "Granted" else "Tap to enable",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (hasOverlay) AppleGreen else MaterialTheme.colorScheme.primary
+                )
+            }
         }
 
         Spacer(Modifier.height(32.dp))

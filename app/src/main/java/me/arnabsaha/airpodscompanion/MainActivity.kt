@@ -144,7 +144,7 @@ fun MainScreen(vm: AirPodsViewModel) {
         LaunchedEffect(connState) {
             if (connState == AacpTransport.ConnectionState.CONNECTED) {
                 if (!showDashboard) {
-                    kotlinx.coroutines.delay(2500) // Let animation play
+                    kotlinx.coroutines.delay(1500) // Brief animation, then show dashboard
                     showDashboard = true
                 }
             } else {

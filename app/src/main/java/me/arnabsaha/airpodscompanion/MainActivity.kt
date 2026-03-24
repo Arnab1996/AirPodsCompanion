@@ -767,14 +767,6 @@ fun ConnectingScreen(vm: AirPodsViewModel, state: AacpTransport.ConnectionState)
 
         Spacer(Modifier.height(24.dp))
 
-        // Connection animation (case opening)
-        ConnectionAnimation(
-            isConnecting = !isConnected,
-            isConnected = isConnected
-        )
-
-        Spacer(Modifier.height(16.dp))
-
         Text(
             text = deviceName ?: "AirPods",
             style = MaterialTheme.typography.headlineSmall,

@@ -329,8 +329,13 @@ class AirPodsService : Service() {
         Log.d(TAG, "Renamed AirPods to: $newName")
     }
 
-    /** Start head tracking (spatial audio). Sends the start packet and begins listening for orientation data. */
+    /** Start head tracking — sends full initialization sequence matching LibrePods */
     fun startHeadTracking() {
+        // LibrePods sends handshake + feature flags before head tracking start
+        _transport.sendRaw(me.arnabsaha.airpodscompanion.protocol.constants.AacpConstants.HANDSHAKE)
+        _transport.sendRaw(me.arnabsaha.airpodscompanion.protocol.constants.AacpConstants.SET_FEATURE_FLAGS)
+        _transport.sendRaw(me.arnabsaha.airpodscompanion.protocol.constants.AacpConstants.REQUEST_NOTIFICATIONS)
+
         val startPacket = byteArrayOf(
             0x04, 0x00, 0x04, 0x00, 0x17, 0x00, 0x00, 0x00,
             0x10, 0x00, 0x10, 0x00, 0x08, 0xA1.toByte(), 0x02, 0x42,
@@ -338,7 +343,7 @@ class AirPodsService : Service() {
             0x40, 0x9C.toByte(), 0x00, 0x00
         )
         _transport.sendRaw(startPacket)
-        Log.d(TAG, "Head tracking started")
+        Log.d(TAG, "Head tracking started (full init sequence)")
     }
 
     /** Stop head tracking */
@@ -357,69 +362,6 @@ class AirPodsService : Service() {
     fun getCaseBatteryFromAd(): Int {
         val nearest = scanner.nearestAirPods.value
         return nearest?.caseBattery ?: -1
-    }
-
-    /** Play a find-my sound on the AirPods by maximizing chime volume and toggling ear detection */
-    fun playFindMySound() {
-        // Set chime volume to max
-        transport.sendControlCommand(ControlCommandId.CHIME_VOLUME, 100.toByte())
-        // Send in-case tone ON (triggers a beep)
-        transport.sendControlCommand(0x31.toByte(), 0x01)
-        Log.d(TAG, "Find My sound sent")
-    }
-
-    /** Set system Bluetooth metadata for battery display in Android Settings */
-    @SuppressLint("MissingPermission")
-    fun updateSystemBatteryMetadata() {
-        val device = connectedBtDevice ?: return
-        val battery = _aacpBattery.value ?: return
-
-        try {
-            HiddenApiBypass.addHiddenApiExemptions("Landroid/bluetooth/BluetoothDevice;")
-
-            val setMetadata = device.javaClass.getMethod(
-                "setMetadata", Int::class.javaPrimitiveType, ByteArray::class.javaPrimitiveType
-            )
-
-            // Metadata keys from BluetoothDevice hidden API
-            val META_UNTETHERED_LEFT_BATTERY = 18
-            val META_UNTETHERED_RIGHT_BATTERY = 19
-            val META_UNTETHERED_CASE_BATTERY = 20
-            val META_UNTETHERED_LEFT_CHARGING = 21
-            val META_UNTETHERED_RIGHT_CHARGING = 22
-            val META_UNTETHERED_CASE_CHARGING = 23
-            val META_MODEL_NAME = 4
-            val META_MANUFACTURER_NAME = 3
-            val META_DEVICE_TYPE = 7
-            val DEVICE_TYPE_UNTETHERED_HEADSET = "6"
-
-            if (battery.leftLevel >= 0)
-                setMetadata.invoke(device, META_UNTETHERED_LEFT_BATTERY,
-                    battery.leftLevel.toString().toByteArray())
-            if (battery.rightLevel >= 0)
-                setMetadata.invoke(device, META_UNTETHERED_RIGHT_BATTERY,
-                    battery.rightLevel.toString().toByteArray())
-            if (battery.caseLevel >= 0)
-                setMetadata.invoke(device, META_UNTETHERED_CASE_BATTERY,
-                    battery.caseLevel.toString().toByteArray())
-
-            setMetadata.invoke(device, META_UNTETHERED_LEFT_CHARGING,
-                if (battery.leftCharging) "true".toByteArray() else "false".toByteArray())
-            setMetadata.invoke(device, META_UNTETHERED_RIGHT_CHARGING,
-                if (battery.rightCharging) "true".toByteArray() else "false".toByteArray())
-            setMetadata.invoke(device, META_UNTETHERED_CASE_CHARGING,
-                if (battery.caseCharging) "true".toByteArray() else "false".toByteArray())
-
-            setMetadata.invoke(device, META_DEVICE_TYPE,
-                DEVICE_TYPE_UNTETHERED_HEADSET.toByteArray())
-            setMetadata.invoke(device, META_MANUFACTURER_NAME, "Apple".toByteArray())
-            setMetadata.invoke(device, META_MODEL_NAME,
-                (_bondedDeviceName.value ?: "AirPods Pro").toByteArray())
-
-            Log.d(TAG, "System battery metadata updated")
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to set system battery metadata: ${e.message}")
-        }
     }
 
     /** Toggle head tracking with gesture detection */
@@ -570,9 +512,6 @@ class AirPodsService : Service() {
         Log.d(TAG, "Battery: L=${state.leftLevel}% R=${state.rightLevel}% C=${state.caseLevel}%")
 
         // Update system Bluetooth metadata (best-effort)
-        // System battery metadata (best-effort, silently fails on most devices)
-        try { updateSystemBatteryMetadata() } catch (_: Exception) {}
-
         // Update notification with battery
         updateNotification("L: ${state.leftLevel}%  R: ${state.rightLevel}%  Case: ${if (state.caseLevel >= 0) "${state.caseLevel}%" else "--"}")
     }
@@ -694,28 +633,33 @@ class AirPodsService : Service() {
         if (!headTrackingActive) return
 
         val raw = packet.rawBytes
-        // Real-time tracking data is 60+ bytes with byte[10] == 0x44 or 0x45
-        // Skip device descriptors (480B, 572B) and control packets (20B, 24B)
-        if (raw.size < 60) return
-        if (raw.size > 10 && raw[10] != 0x44.toByte() && raw[10] != 0x45.toByte()) return
 
-        Log.d(TAG, "Head tracking ORIENTATION data: ${raw.size}B")
+        // Log ALL tracking packets when active for diagnostics
+        if (raw.size > 10) {
+            Log.d(TAG, "HT: ${raw.size}B byte[10]=0x${"%02X".format(raw[10])}")
+        }
 
-        // Feed raw data to gesture detector
-        gestureDetector.processPacket(raw)
+        // Skip small control packets and large descriptor packets
+        if (raw.size < 60 || raw.size > 200) return
 
-        val gesture = gestureDetector.lastGesture.value
-        if (gesture != HeadGestureDetector.Gesture.NONE) {
-            when (gesture) {
-                HeadGestureDetector.Gesture.NOD_YES -> {
-                    Log.d(TAG, "HEAD GESTURE: NOD (YES)")
-                    sendMediaKey(KeyEvent.KEYCODE_CALL)
+        // Check for the orientation data marker (0x44 or 0x45 at byte 10)
+        if (raw[10] == 0x44.toByte() || raw[10] == 0x45.toByte()) {
+            Log.d(TAG, "HEAD TRACKING ORIENTATION: ${raw.size}B")
+            gestureDetector.processPacket(raw)
+
+            val gesture = gestureDetector.lastGesture.value
+            if (gesture != HeadGestureDetector.Gesture.NONE) {
+                when (gesture) {
+                    HeadGestureDetector.Gesture.NOD_YES -> {
+                        Log.d(TAG, "HEAD GESTURE: NOD (YES)")
+                        sendMediaKey(KeyEvent.KEYCODE_CALL)
+                    }
+                    HeadGestureDetector.Gesture.SHAKE_NO -> {
+                        Log.d(TAG, "HEAD GESTURE: SHAKE (NO)")
+                        sendMediaKey(KeyEvent.KEYCODE_ENDCALL)
+                    }
+                    else -> {}
                 }
-                HeadGestureDetector.Gesture.SHAKE_NO -> {
-                    Log.d(TAG, "HEAD GESTURE: SHAKE (NO)")
-                    sendMediaKey(KeyEvent.KEYCODE_ENDCALL)
-                }
-                else -> {}
             }
         }
     }

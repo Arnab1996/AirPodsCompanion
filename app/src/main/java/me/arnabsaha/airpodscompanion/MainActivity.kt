@@ -300,14 +300,9 @@ fun DashboardScreen(vm: AirPodsViewModel) {
         // ═══ Head Gestures Section ═══
         SectionHeader("Head Gestures")
         SectionCard {
-            Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
-                Text("Head Gestures", style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
-                Text("Requires HID protocol connection (coming soon). Nod or shake to respond to calls.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
-                    lineHeight = 16.sp)
-            }
+            SettingToggle("Head Gestures",
+                "Move your head up and down or side to side to respond to calls",
+                enabled = headTrackingOn, onToggle = { vm.toggleHeadTracking() })
             Divider()
             SettingInfo("Accept, Reply", "Up and Down")
             Divider()
@@ -397,12 +392,14 @@ fun DashboardScreen(vm: AirPodsViewModel) {
 
         // ═══ Disconnect Button ═══
         androidx.compose.material3.OutlinedButton(
-            onClick = { vm.autoConnect() },
+            onClick = { /* TODO: implement disconnect */ },
             modifier = Modifier.fillMaxWidth().height(48.dp),
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(12.dp),
+            colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
+                contentColor = AppleRed
+            )
         ) {
-            Text("Reconnect", style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary)
+            Text("Disconnect", style = MaterialTheme.typography.labelLarge)
         }
 
         Spacer(Modifier.height(32.dp))

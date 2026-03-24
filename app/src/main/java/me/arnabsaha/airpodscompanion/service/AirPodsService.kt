@@ -441,34 +441,44 @@ class AirPodsService : Service() {
     // Internal
     // ═══════════════════════════════════════
 
+    private var hasConnectedOnce = false
+
     private fun observeConnectionState() {
         serviceScope.launch {
             _transport.connectionState.collect { state ->
-                // Stop scanning when connected to save battery and reduce lag
                 when (state) {
                     AacpTransport.ConnectionState.CONNECTED -> {
                         scanner.stopScan()
                         Log.d(TAG, "Stopped BLE scan (connected)")
 
-                        // Show Dynamic Island popup
-                        val ancName = when (_ancMode.value) {
-                            NoiseControlMode.OFF -> "Off"
-                            NoiseControlMode.NOISE_CANCELLATION -> "Noise Cancellation"
-                            NoiseControlMode.TRANSPARENCY -> "Transparency"
-                            NoiseControlMode.ADAPTIVE -> "Adaptive"
-                            else -> "ANC"
+                        // Only show popup on first connection, not reconnects
+                        if (!hasConnectedOnce) {
+                            hasConnectedOnce = true
+                            val ancName = when (_ancMode.value) {
+                                NoiseControlMode.OFF -> "Off"
+                                NoiseControlMode.NOISE_CANCELLATION -> "Noise Cancellation"
+                                NoiseControlMode.TRANSPARENCY -> "Transparency"
+                                NoiseControlMode.ADAPTIVE -> "Adaptive"
+                                else -> "ANC"
+                            }
+                            connectionPopup.show(
+                                _bondedDeviceName.value ?: "AirPods",
+                                _aacpBattery.value,
+                                ancName
+                            )
                         }
-                        connectionPopup.show(
-                            _bondedDeviceName.value ?: "AirPods",
-                            _aacpBattery.value,
-                            ancName
-                        )
                     }
                     AacpTransport.ConnectionState.DISCONNECTED -> {
+                        // Only restart scanner if not in a reconnection cycle
+                        // The transport handles reconnection internally
+                    }
+                    AacpTransport.ConnectionState.FAILED -> {
+                        // Connection truly failed — restart scanner for discovery
                         if (!scanner.isScanning()) {
                             scanner.startScan()
-                            Log.d(TAG, "Restarted BLE scan (disconnected)")
+                            Log.d(TAG, "Restarted BLE scan (connection failed)")
                         }
+                        hasConnectedOnce = false
                     }
                     else -> {}
                 }

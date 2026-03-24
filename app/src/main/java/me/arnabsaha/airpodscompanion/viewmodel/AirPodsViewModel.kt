@@ -331,23 +331,28 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
      * Apply all persisted settings to the service on first connection.
      * This replaces the LaunchedEffect(Unit) block that was in DashboardScreen.
      */
+    private var settingsApplied = false
+
     private fun applySavedSettings(service: AirPodsService) {
         viewModelScope.launch {
-            // Wait for CONNECTED state before sending saved settings
             service.connectionState.collect { state ->
-                if (state == AacpTransport.ConnectionState.CONNECTED) {
+                if (state == AacpTransport.ConnectionState.CONNECTED && !settingsApplied) {
+                    settingsApplied = true
+                    // Stagger commands to avoid flooding the L2CAP channel
+                    kotlinx.coroutines.delay(500)
                     service.setConversationalAwareness(_caEnabled.value)
+                    kotlinx.coroutines.delay(100)
                     service.setAdaptiveVolume(_avEnabled.value)
+                    kotlinx.coroutines.delay(100)
                     service.setEarDetection(_edEnabled.value)
-                    service.transport.sendControlCommand(0x1B, if (_oneBudAnc.value) 0x01 else 0x02)
-                    service.transport.sendControlCommand(0x25, if (_volumeSwipe.value) 0x01 else 0x02)
-                    service.transport.sendControlCommand(0x35, if (_sleepDetection.value) 0x01 else 0x02)
-                    service.transport.sendControlCommand(0x31, if (_inCaseTone.value) 0x01 else 0x02)
-                    service.transport.sendControlCommand(0x16,
-                        if (_stemAction.value == "Noise Control") 0x01 else 0x00,
-                        if (_stemAction.value == "Noise Control") 0x01 else 0x00)
+                    kotlinx.coroutines.delay(100)
                     service.setChimeVolume(_chimeVolume.value.toInt())
-                    Log.d(TAG, "All saved settings applied to service")
+                    Log.d(TAG, "Saved settings applied (staggered)")
+                }
+                if (state == AacpTransport.ConnectionState.FAILED ||
+                    state == AacpTransport.ConnectionState.DISCONNECTED) {
+                    settingsApplied = false
+                }
                     return@collect // Only apply once per connection
                 }
             }

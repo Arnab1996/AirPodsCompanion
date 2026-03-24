@@ -254,9 +254,16 @@ class AacpTransport {
     }
 
     private fun handleDisconnect() {
-        scope.launch {
-            socketMutex.withLock { closeSocketInternal() }
-        }
+        // Close socket synchronously before updating state
+        try {
+            inputStream?.close()
+            outputStream?.close()
+            socket?.close()
+        } catch (_: Exception) {}
+        inputStream = null
+        outputStream = null
+        socket = null
+
         if (_connectionState.value == ConnectionState.CONNECTED ||
             _connectionState.value == ConnectionState.HANDSHAKING) {
             _connectionState.value = ConnectionState.DISCONNECTED

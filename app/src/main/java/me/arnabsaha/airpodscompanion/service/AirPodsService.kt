@@ -341,21 +341,53 @@ class AirPodsService : Service() {
         Log.d(TAG, "Renamed AirPods to: $newName")
     }
 
-    /** Start head tracking — sends ownership claim + start packet matching LibrePods */
+    /** Start head tracking — performs full device takeover then sends start packet */
+    @SuppressLint("MissingPermission")
     fun startHeadTracking() {
-        // Step 1: Claim connection ownership (required for head tracking data stream)
-        transport.sendControlCommand(0x06, 0x01) // OWNS_CONNECTION = true
-        Log.d(TAG, "Claimed connection ownership for head tracking")
+        val device = connectedBtDevice ?: run {
+            Log.w(TAG, "Cannot start head tracking: no connected device")
+            return
+        }
+        val targetMac = device.address
+        val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter
+        val selfMac = adapter?.address ?: "02:00:00:00:00:00"
 
-        // Step 2: Send the start head tracking packet
-        val startPacket = byteArrayOf(
-            0x04, 0x00, 0x04, 0x00, 0x17, 0x00, 0x00, 0x00,
-            0x10, 0x00, 0x10, 0x00, 0x08, 0xA1.toByte(), 0x02, 0x42,
-            0x0B, 0x08, 0x0E, 0x10, 0x02, 0x1A, 0x05, 0x01,
-            0x40, 0x9C.toByte(), 0x00, 0x00
-        )
-        _transport.sendRaw(startPacket)
-        Log.d(TAG, "Head tracking start packet sent")
+        Log.d(TAG, "Head tracking takeover: target=$targetMac self=$selfMac")
+
+        // Step 1: Claim connection ownership
+        transport.sendControlCommand(0x06, 0x01)
+        Log.d(TAG, "HT Step 1: OWNS_CONNECTION=1")
+
+        // Step 2: Send Media Information (smart routing)
+        val mediaInfo = me.arnabsaha.airpodscompanion.protocol.aap.SmartRoutingPackets
+            .createMediaInfoPacket(targetMac, selfMac)
+        _transport.sendRaw(mediaInfo)
+        Log.d(TAG, "HT Step 2: MediaInfo (${mediaInfo.size}B)")
+
+        // Step 3: Send Show UI (smart routing)
+        val showUI = me.arnabsaha.airpodscompanion.protocol.aap.SmartRoutingPackets
+            .createShowUIPacket(targetMac)
+        _transport.sendRaw(showUI)
+        Log.d(TAG, "HT Step 3: ShowUI (${showUI.size}B)")
+
+        // Step 4: Send Hijack Request
+        val hijack = me.arnabsaha.airpodscompanion.protocol.aap.SmartRoutingPackets
+            .createHijackRequestPacket(targetMac)
+        _transport.sendRaw(hijack)
+        Log.d(TAG, "HT Step 4: Hijack (${hijack.size}B)")
+
+        // Step 5: Wait 500ms then send head tracking start
+        ioScope.launch {
+            kotlinx.coroutines.delay(500)
+            val startPacket = byteArrayOf(
+                0x04, 0x00, 0x04, 0x00, 0x17, 0x00, 0x00, 0x00,
+                0x10, 0x00, 0x10, 0x00, 0x08, 0xA1.toByte(), 0x02, 0x42,
+                0x0B, 0x08, 0x0E, 0x10, 0x02, 0x1A, 0x05, 0x01,
+                0x40, 0x9C.toByte(), 0x00, 0x00
+            )
+            _transport.sendRaw(startPacket)
+            Log.d(TAG, "HT Step 5: Start packet sent")
+        }
     }
 
     /** Stop head tracking */

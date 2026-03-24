@@ -570,9 +570,8 @@ class AirPodsService : Service() {
         Log.d(TAG, "Battery: L=${state.leftLevel}% R=${state.rightLevel}% C=${state.caseLevel}%")
 
         // Update system Bluetooth metadata (best-effort)
-        try { updateSystemBatteryMetadata() } catch (e: Exception) {
-            Log.w(TAG, "System metadata update failed: ${e.message}")
-        }
+        // System battery metadata (best-effort, silently fails on most devices)
+        try { updateSystemBatteryMetadata() } catch (_: Exception) {}
 
         // Update notification with battery
         updateNotification("L: ${state.leftLevel}%  R: ${state.rightLevel}%  Case: ${if (state.caseLevel >= 0) "${state.caseLevel}%" else "--"}")

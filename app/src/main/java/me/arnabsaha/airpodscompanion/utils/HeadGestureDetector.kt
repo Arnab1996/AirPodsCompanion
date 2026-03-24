@@ -66,7 +66,7 @@ class HeadGestureDetector {
      * Extract orientation from bytes 43-48 and detect gestures.
      */
     fun processPacket(rawBytes: ByteArray) {
-        if (rawBytes.size < 55) return
+        if (rawBytes.size < 50) return  // Need at least bytes up to offset 48
 
         // Extract orientation values (signed 16-bit, little-endian)
         val o1 = readInt16LE(rawBytes, 43)

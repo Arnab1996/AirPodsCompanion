@@ -116,7 +116,7 @@ class ConnectionPopup(private val context: Context) {
         val container = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(dp(16), dp(14), dp(16), dp(14))
-            setBackgroundColor(0xE6000000.toInt())
+            setBackgroundColor(0xF0282828.toInt())
             elevation = dp(8).toFloat()
             clipToOutline = true
             outlineProvider = object : android.view.ViewOutlineProvider() {

@@ -692,18 +692,19 @@ class AirPodsService : Service() {
 
     // ═══ Head Tracking Data (opcode 0x17) ═══
     private fun handleHeadTrackingData(packet: AacpPacket) {
-        Log.d(TAG, "Head tracking packet: ${packet.rawBytes.size}B, active=$headTrackingActive")
-
         if (!headTrackingActive) return
-        if (packet.rawBytes.size < 55) {
-            Log.d(TAG, "Head tracking packet too small for orientation data: ${packet.rawBytes.size}B")
-            return
-        }
+
+        val raw = packet.rawBytes
+        // Real-time tracking data is 60+ bytes with byte[10] == 0x44 or 0x45
+        // Skip device descriptors (480B, 572B) and control packets (20B, 24B)
+        if (raw.size < 60) return
+        if (raw.size > 10 && raw[10] != 0x44.toByte() && raw[10] != 0x45.toByte()) return
+
+        Log.d(TAG, "Head tracking ORIENTATION data: ${raw.size}B")
 
         // Feed raw data to gesture detector
-        gestureDetector.processPacket(packet.rawBytes)
+        gestureDetector.processPacket(raw)
 
-        // Check for gestures and act on them
         val gesture = gestureDetector.lastGesture.value
         if (gesture != HeadGestureDetector.Gesture.NONE) {
             when (gesture) {

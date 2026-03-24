@@ -347,11 +347,15 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
                     service.setEarDetection(_edEnabled.value)
                     kotlinx.coroutines.delay(100)
                     service.setChimeVolume(_chimeVolume.value.toInt())
-                    // Start head tracking if it was previously enabled
+                    // Start head tracking AFTER a longer delay to ensure connection is stable
                     if (_headTracking.value) {
-                        kotlinx.coroutines.delay(200)
-                        service.toggleHeadTracking()
-                        Log.d(TAG, "Head tracking re-enabled from saved settings")
+                        kotlinx.coroutines.delay(2000) // Wait for connection to stabilize
+                        if (service.transport.isConnected) {
+                            service.toggleHeadTracking()
+                            Log.d(TAG, "Head tracking re-enabled from saved settings")
+                        } else {
+                            Log.w(TAG, "Skipped head tracking — connection not stable")
+                        }
                     }
                     Log.d(TAG, "Saved settings applied (staggered)")
                 }

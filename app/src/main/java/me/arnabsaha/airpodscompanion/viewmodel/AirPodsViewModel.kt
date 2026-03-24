@@ -353,8 +353,6 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
                     state == AacpTransport.ConnectionState.DISCONNECTED) {
                     settingsApplied = false
                 }
-                    return@collect // Only apply once per connection
-                }
             }
         }
     }

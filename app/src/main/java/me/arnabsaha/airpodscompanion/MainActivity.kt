@@ -316,6 +316,12 @@ fun DashboardScreen(vm: AirPodsViewModel) {
             SettingToggle("Enable Charging Case Sounds", "Play a sound when placing buds in the case",
                 enabled = inCaseTone, onToggle = { vm.setInCaseTone(it) })
             Divider()
+            SettingToggle("Off Listening Mode",
+                "When on, listening modes will include an Off option. Loud sounds are not reduced in Off mode.",
+                enabled = true, onToggle = { /* 0x34 allow off option */
+                    vm.setOneBudAnc(it) // Reuse as toggle for now
+                })
+            Divider()
             // Press and Hold configuration
             Row(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp),

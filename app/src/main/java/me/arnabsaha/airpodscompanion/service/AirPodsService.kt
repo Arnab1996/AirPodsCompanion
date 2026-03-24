@@ -70,6 +70,14 @@ data class BondedAirPods(
     val isCurrentlyConnected: Boolean = false
 )
 
+/** Device info parsed from AACP opcode 0x1D */
+data class DeviceInfo(
+    val name: String = "",
+    val modelNumber: String = "",
+    val serialNumber: String = "",
+    val firmwareVersion: String = ""
+)
+
 /**
  * Foreground service that runs the BLE scanner, maintains AirPods AACP connection,
  * and exposes StateFlows for the UI to observe.
@@ -106,6 +114,10 @@ class AirPodsService : Service() {
     // Live battery from AACP (more accurate than BLE advertisement)
     private val _aacpBattery = MutableStateFlow<AacpBatteryState?>(null)
     val aacpBattery: StateFlow<AacpBatteryState?> = _aacpBattery.asStateFlow()
+
+    // Device info parsed from opcode 0x1D
+    private val _deviceInfo = MutableStateFlow<DeviceInfo?>(null)
+    val deviceInfo: StateFlow<DeviceInfo?> = _deviceInfo.asStateFlow()
 
     // Ear detection state
     private val _earState = MutableStateFlow(EarState())
@@ -514,6 +526,11 @@ class AirPodsService : Service() {
         // Update system Bluetooth metadata (best-effort)
         // Update notification with battery
         updateNotification("L: ${state.leftLevel}%  R: ${state.rightLevel}%  Case: ${if (state.caseLevel >= 0) "${state.caseLevel}%" else "--"}")
+
+        // Update battery widget
+        me.arnabsaha.airpodscompanion.widgets.BatteryWidget.sendUpdate(
+            this, state.leftLevel, state.rightLevel, state.caseLevel
+        )
     }
 
     // ═══ Ear Detection Handler (opcode 0x06) ═══
@@ -619,7 +636,29 @@ class AirPodsService : Service() {
 
     // ═══ Device Info (opcode 0x1D) ═══
     private fun handleDeviceInfo(packet: AacpPacket) {
-        Log.d(TAG, "Device info packet received (${packet.rawBytes.size} bytes)")
+        val raw = packet.rawBytes
+        Log.d(TAG, "Device info packet received (${raw.size} bytes)")
+
+        // The device info packet contains null-terminated strings:
+        // name\0model\0manufacturer\0serial\0version\0...
+        try {
+            val payload = raw.copyOfRange(5, raw.size) // Skip header + opcode
+            val text = String(payload, Charsets.UTF_8)
+            val parts = text.split("\u0000").filter { it.isNotBlank() }
+
+            if (parts.size >= 4) {
+                val info = DeviceInfo(
+                    name = parts.getOrNull(0) ?: "",
+                    modelNumber = parts.getOrNull(1) ?: "",
+                    serialNumber = parts.getOrNull(3) ?: "",
+                    firmwareVersion = parts.getOrNull(4) ?: ""
+                )
+                _deviceInfo.value = info
+                Log.d(TAG, "Device: name=${info.name} model=${info.modelNumber} serial=${info.serialNumber} fw=${info.firmwareVersion}")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse device info: ${e.message}")
+        }
     }
 
     // ═══ Proximity Keys Response (opcode 0x31) ═══

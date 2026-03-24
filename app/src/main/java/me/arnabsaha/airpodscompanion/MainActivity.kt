@@ -79,6 +79,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
@@ -246,245 +247,157 @@ fun DashboardScreen(vm: AirPodsViewModel) {
 
         Spacer(Modifier.height(20.dp))
 
-        // Settings section with proper toggles and icons
-        Text("Features", style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
-            modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
-
+        // ═══ Audio Section (macOS-inspired flat rows) ═══
+        SectionHeader("Audio")
         SectionCard {
-            IconToggleRow(
-                icon = Icons.AutoMirrored.Filled.VolumeOff,
-                title = "Conversational Awareness",
-                subtitle = "Lower volume when you speak",
-                enabled = caEnabled,
-                onToggle = { vm.setConversationalAwareness(it) }
-            )
-
+            SettingToggle("Personalized Volume", "Adjusts volume in response to your environment",
+                enabled = avEnabled, onToggle = { vm.setAdaptiveVolume(it) })
             Divider()
-
-            IconToggleRow(
-                icon = Icons.Default.GraphicEq,
-                title = "Adaptive Volume",
-                subtitle = "Adjust to your environment",
-                enabled = avEnabled,
-                onToggle = { vm.setAdaptiveVolume(it) }
-            )
-
+            SettingToggle("Conversation Awareness",
+                "Lowers media volume and reduces background noise when you start speaking",
+                enabled = caEnabled, onToggle = { vm.setConversationalAwareness(it) })
             Divider()
-
-            IconToggleRow(
-                icon = Icons.Default.Headphones,
-                title = "Ear Detection",
-                subtitle = "Auto play/pause",
-                enabled = edEnabled,
-                onToggle = { vm.setEarDetection(it) }
-            )
-        }
-
-        Spacer(Modifier.height(20.dp))
-
-        // Device section
-        Text("Device", style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
-            modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
-
-        SectionCard {
-            var showRenameDialog by remember { mutableStateOf(false) }
-
-            // Rename row with pencil icon
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { showRenameDialog = true }
-                    .padding(vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Default.Edit, null, Modifier.size(20.dp),
-                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Name", style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface)
-                    Text(deviceName ?: "AirPods Pro",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
-                }
-                Icon(Icons.Default.Edit, null, Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.primary)
-            }
-
-            if (showRenameDialog) {
-                RenameDialog(
-                    currentName = deviceName ?: "AirPods Pro",
-                    onDismiss = { showRenameDialog = false },
-                    onRename = { newName ->
-                        vm.renameAirPods(newName)
-                        showRenameDialog = false
-                    }
-                )
-            }
-
-            Divider()
-
-            // Spatial Audio with icon
-            IconToggleRow(
-                icon = Icons.Default.SurroundSound,
-                title = "Spatial Audio",
-                subtitle = "Head tracking for immersive sound",
-                enabled = headTrackingOn,
-                onToggle = { vm.toggleHeadTracking() }
-            )
-        }
-
-        Spacer(Modifier.height(20.dp))
-
-        // Stem & Accessibility
-        Text("Stem & Accessibility", style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
-            modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
-
-        SectionCard {
-            // Chime Volume Slider with feedback
+            // Chime Volume with labeled slider
             var localChimeVolume by remember { mutableStateOf(chimeVolume) }
             LaunchedEffect(chimeVolume) { localChimeVolume = chimeVolume }
-
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.AutoMirrored.Filled.VolumeUp, "Chime Volume", Modifier.size(20.dp),
-                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
-                        Text("Chime Volume", style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface)
-                        Text("${localChimeVolume.toInt()}%", style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary)
-                    }
+            Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+                Text("Chime Volume", style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Quiet", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
                     androidx.compose.material3.Slider(
                         value = localChimeVolume,
                         onValueChange = { localChimeVolume = it },
                         onValueChangeFinished = { vm.setChimeVolume(localChimeVolume) },
                         valueRange = 0f..100f,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
                         colors = androidx.compose.material3.SliderDefaults.colors(
                             thumbColor = MaterialTheme.colorScheme.primary,
                             activeTrackColor = MaterialTheme.colorScheme.primary
                         )
                     )
+                    Text("Loud", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
                 }
             }
-
             Divider()
-
-            IconToggleRow(
-                icon = Icons.Default.HearingDisabled,
-                title = "One Bud ANC",
-                subtitle = "Keep noise cancellation with one earbud",
-                enabled = oneBudAnc,
-                onToggle = { vm.setOneBudAnc(it) }
-            )
-
+            SettingToggle("Automatic Ear Detection", "Auto play/pause when earbuds are removed",
+                enabled = edEnabled, onToggle = { vm.setEarDetection(it) })
             Divider()
-
-            IconToggleRow(
-                icon = Icons.Default.SwipeUp,
-                title = "Volume Swipe",
-                subtitle = "Swipe stem to adjust volume",
-                enabled = volumeSwipe,
-                onToggle = { vm.setVolumeSwipe(it) }
-            )
-
+            SettingToggle("Pause When Falling Asleep", "Automatically pause media when sleep is detected",
+                enabled = sleepDetection, onToggle = { vm.setSleepDetection(it) })
             Divider()
-
-            IconToggleRow(
-                icon = Icons.Default.Bedtime,
-                title = "Sleep Detection",
-                subtitle = "Auto-pause when you fall asleep",
-                enabled = sleepDetection,
-                onToggle = { vm.setSleepDetection(it) }
-            )
-
+            SettingToggle("One Bud ANC", "Keep noise cancellation active with a single earbud",
+                enabled = oneBudAnc, onToggle = { vm.setOneBudAnc(it) })
             Divider()
+            SettingToggle("Volume Swipe", "Swipe the stem to adjust volume",
+                enabled = volumeSwipe, onToggle = { vm.setVolumeSwipe(it) })
+        }
 
-            IconToggleRow(
-                icon = Icons.Default.NotificationsActive,
-                title = "In-Case Tone",
-                subtitle = "Sound when placing buds in case",
-                enabled = inCaseTone,
-                onToggle = { vm.setInCaseTone(it) }
-            )
+        Spacer(Modifier.height(20.dp))
 
+        // ═══ Head Gestures Section ═══
+        SectionHeader("Head Gestures")
+        SectionCard {
+            SettingToggle("Head Gestures",
+                "Move your head up and down or side to side to respond to calls",
+                enabled = headTrackingOn, onToggle = { vm.toggleHeadTracking() })
             Divider()
+            SettingInfo("Accept, Reply", "Up and Down")
+            Divider()
+            SettingInfo("Decline, Dismiss", "Side to Side")
+        }
 
-            // Stem Long Press Configuration — Noise Control vs Off
+        Spacer(Modifier.height(20.dp))
+
+        // ═══ Case & Stem Section ═══
+        SectionCard {
+            SettingToggle("Enable Charging Case Sounds", "Play a sound when placing buds in the case",
+                enabled = inCaseTone, onToggle = { vm.setInCaseTone(it) })
+            Divider()
+            // Press and Hold configuration
             Row(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Default.TouchApp, null, Modifier.size(20.dp),
-                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Press & Hold", style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface)
-                    Text("Currently: $stemAction",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
-                }
-                androidx.compose.material3.TextButton(onClick = {
-                    val newAction = if (stemAction == "Noise Control") "Off" else "Noise Control"
-                    vm.setStemAction(newAction)
-                }) {
-                    Text(if (stemAction == "Noise Control") "Set to Off" else "Set to Noise Control",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary)
-                }
+                Text("Press and Hold", style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface)
+                Text(stemAction, style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
             }
         }
 
         Spacer(Modifier.height(20.dp))
 
-        // Device Info Card
-        Text("About", style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
-            modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
-
+        // ═══ Spatial Audio Section ═══
+        SectionHeader("Spatial Audio")
         SectionCard {
-            InfoRow("Model", deviceName ?: "AirPods Pro")
-            Divider()
-            InfoRow("Protocol", "AACP / L2CAP")
-            Divider()
-            InfoRow("Version", "0.1.0")
-            Divider()
+            SettingToggle("Personalized Spatial Audio",
+                "Improves rendering of Spatial Audio when using supported AirPods with your device",
+                enabled = headTrackingOn, onToggle = { vm.toggleHeadTracking() })
+        }
 
-            // Overlay permission shortcut
-            val context = LocalContext.current
-            val hasOverlay = android.provider.Settings.canDrawOverlays(context)
+        Spacer(Modifier.height(20.dp))
+
+        // ═══ Device Section ═══
+        SectionCard {
+            var showRenameDialog by remember { mutableStateOf(false) }
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        context.startActivity(
-                            Intent(
-                                android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                "package:${context.packageName}".toUri()
-                            )
-                        )
-                    }
-                    .padding(vertical = 12.dp),
+                modifier = Modifier.fillMaxWidth().clickable { showRenameDialog = true }.padding(vertical = 14.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Popup Overlay", style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-                Text(
-                    if (hasOverlay) "Granted" else "Tap to enable",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (hasOverlay) AppleGreen else MaterialTheme.colorScheme.primary
-                )
+                Text("Name", style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface)
+                Text(deviceName ?: "AirPods Pro", style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
             }
+            if (showRenameDialog) {
+                RenameDialog(currentName = deviceName ?: "AirPods Pro",
+                    onDismiss = { showRenameDialog = false },
+                    onRename = { vm.renameAirPods(it); showRenameDialog = false })
+            }
+            Divider()
+            SettingInfo("Model", deviceName ?: "AirPods Pro")
+            Divider()
+            SettingInfo("Protocol", "AACP / L2CAP")
+            Divider()
+            SettingInfo("Version", "0.1.0")
+            Divider()
+            // Overlay permission
+            val context = LocalContext.current
+            val hasOverlay = android.provider.Settings.canDrawOverlays(context)
+            Row(
+                modifier = Modifier.fillMaxWidth()
+                    .clickable {
+                        context.startActivity(Intent(
+                            android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            "package:${context.packageName}".toUri()))
+                    }
+                    .padding(vertical = 14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Popup Overlay", style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface)
+                Text(if (hasOverlay) "Granted" else "Tap to enable",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (hasOverlay) AppleGreen else MaterialTheme.colorScheme.primary)
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        // ═══ Disconnect Button ═══
+        androidx.compose.material3.OutlinedButton(
+            onClick = { vm.autoConnect() },
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Text("Reconnect", style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary)
         }
 
         Spacer(Modifier.height(32.dp))
@@ -696,6 +609,56 @@ fun RenameDialog(currentName: String, onDismiss: () -> Unit, onRename: (String) 
         },
         containerColor = MaterialTheme.colorScheme.surface
     )
+}
+
+@Composable
+fun SectionHeader(title: String) {
+    Text(title, style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onBackground,
+        modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 8.dp))
+}
+
+@Composable
+fun SettingToggle(title: String, description: String, enabled: Boolean, onToggle: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onToggle(!enabled) }
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface)
+            Text(description, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                lineHeight = 16.sp)
+        }
+        Spacer(Modifier.width(12.dp))
+        androidx.compose.material3.Switch(
+            checked = enabled,
+            onCheckedChange = onToggle,
+            colors = androidx.compose.material3.SwitchDefaults.colors(
+                checkedTrackColor = AppleGreen,
+                checkedThumbColor = Color.White
+            )
+        )
+    }
+}
+
+@Composable
+fun SettingInfo(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface)
+        Text(value, style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+    }
 }
 
 @Composable

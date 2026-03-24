@@ -318,9 +318,7 @@ fun DashboardScreen(vm: AirPodsViewModel) {
             Divider()
             SettingToggle("Off Listening Mode",
                 "When on, listening modes will include an Off option. Loud sounds are not reduced in Off mode.",
-                enabled = true, onToggle = { /* 0x34 allow off option */
-                    vm.setOneBudAnc(it) // Reuse as toggle for now
-                })
+                enabled = true, onToggle = { /* Control command 0x34: allow off option */ })
             Divider()
             // Press and Hold configuration
             Row(

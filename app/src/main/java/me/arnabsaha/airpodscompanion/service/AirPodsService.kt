@@ -341,13 +341,13 @@ class AirPodsService : Service() {
         Log.d(TAG, "Renamed AirPods to: $newName")
     }
 
-    /** Start head tracking — sends full initialization sequence matching LibrePods */
+    /** Start head tracking — sends ownership claim + start packet matching LibrePods */
     fun startHeadTracking() {
-        // LibrePods sends handshake + feature flags before head tracking start
-        _transport.sendRaw(me.arnabsaha.airpodscompanion.protocol.constants.AacpConstants.HANDSHAKE)
-        _transport.sendRaw(me.arnabsaha.airpodscompanion.protocol.constants.AacpConstants.SET_FEATURE_FLAGS)
-        _transport.sendRaw(me.arnabsaha.airpodscompanion.protocol.constants.AacpConstants.REQUEST_NOTIFICATIONS)
+        // Step 1: Claim connection ownership (required for head tracking data stream)
+        transport.sendControlCommand(0x06, 0x01) // OWNS_CONNECTION = true
+        Log.d(TAG, "Claimed connection ownership for head tracking")
 
+        // Step 2: Send the start head tracking packet
         val startPacket = byteArrayOf(
             0x04, 0x00, 0x04, 0x00, 0x17, 0x00, 0x00, 0x00,
             0x10, 0x00, 0x10, 0x00, 0x08, 0xA1.toByte(), 0x02, 0x42,
@@ -355,7 +355,7 @@ class AirPodsService : Service() {
             0x40, 0x9C.toByte(), 0x00, 0x00
         )
         _transport.sendRaw(startPacket)
-        Log.d(TAG, "Head tracking started (full init sequence)")
+        Log.d(TAG, "Head tracking start packet sent")
     }
 
     /** Stop head tracking */

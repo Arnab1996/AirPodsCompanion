@@ -365,7 +365,7 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
         if (service != null) {
             action(service)
         } else {
-            Log.w(TAG, "$actionName failed: service not bound")Connect
+            Log.w(TAG, "$actionName failed: service not bound")
             _connectionError.value = "Service not connected. Please wait..."
         }
     }

@@ -130,7 +130,7 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     /** In-Case Tone toggle state. */
     val inCaseTone: StateFlow<Boolean> = _inCaseTone.asStateFlow()
 
-    private val _headTracking = MutableStateFlow(prefs.getBoolean("head_tracking", false))
+    private val _headTracking = MutableStateFlow(false) // Always starts OFF — must be manually enabled
     /** Head Tracking / Spatial Audio toggle state. */
     val headTracking: StateFlow<Boolean> = _headTracking.asStateFlow()
 
@@ -347,16 +347,9 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
                     service.setEarDetection(_edEnabled.value)
                     kotlinx.coroutines.delay(100)
                     service.setChimeVolume(_chimeVolume.value.toInt())
-                    // Start head tracking AFTER a longer delay to ensure connection is stable
-                    if (_headTracking.value) {
-                        kotlinx.coroutines.delay(2000) // Wait for connection to stabilize
-                        if (service.transport.isConnected) {
-                            service.toggleHeadTracking()
-                            Log.d(TAG, "Head tracking re-enabled from saved settings")
-                        } else {
-                            Log.w(TAG, "Skipped head tracking — connection not stable")
-                        }
-                    }
+                    // NOTE: Head tracking NOT auto-started on connect.
+                    // The takeover protocol disrupts normal AACP initialization.
+                    // User must manually toggle it from the dashboard after connection stabilizes.
                     Log.d(TAG, "Saved settings applied (staggered)")
                 }
                 if (state == AacpTransport.ConnectionState.FAILED ||

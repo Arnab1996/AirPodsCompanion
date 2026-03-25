@@ -349,8 +349,9 @@ class AirPodsService : Service() {
             return
         }
         val targetMac = device.address
-        val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter
-        val selfMac = adapter?.address ?: "02:00:00:00:00:00"
+
+        // Get real self MAC address (Android hides it behind 02:00:00:00:00:00)
+        val selfMac = getRealBluetoothMac()
 
         Log.d(TAG, "Head tracking takeover: target=$targetMac self=$selfMac")
 
@@ -736,6 +737,49 @@ class AirPodsService : Service() {
     }
 
     // ═══ Media Control Helper ═══
+    /** Get real Bluetooth MAC address (Android hides it since API 23) */
+    @SuppressLint("MissingPermission", "HardwareIds")
+    private fun getRealBluetoothMac(): String {
+        // Method 1: Try Settings.Secure
+        try {
+            val mac = android.provider.Settings.Secure.getString(
+                contentResolver, "bluetooth_address"
+            )
+            if (mac != null && mac != "02:00:00:00:00:00") {
+                Log.d(TAG, "Got BT MAC from Settings.Secure: $mac")
+                return mac
+            }
+        } catch (_: Exception) {}
+
+        // Method 2: Try reading from system file
+        try {
+            val file = java.io.File("/sys/class/bluetooth/hci0/address")
+            if (file.exists()) {
+                val mac = file.readText().trim()
+                if (mac.isNotEmpty() && mac != "02:00:00:00:00:00") {
+                    Log.d(TAG, "Got BT MAC from /sys: $mac")
+                    return mac
+                }
+            }
+        } catch (_: Exception) {}
+
+        // Method 3: Try BluetoothAdapter directly
+        try {
+            val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter
+            val mac = adapter?.address
+            if (mac != null && mac != "02:00:00:00:00:00") {
+                Log.d(TAG, "Got BT MAC from adapter: $mac")
+                return mac
+            }
+        } catch (_: Exception) {}
+
+        // Fallback: use the connected device's address reversed as a proxy
+        // This isn't our real MAC but at least it's a valid BT address
+        val fallback = connectedBtDevice?.address ?: "02:00:00:00:00:00"
+        Log.w(TAG, "Could not get real BT MAC, using fallback: $fallback")
+        return fallback
+    }
+
     private fun sendMediaKey(keyCode: Int) {
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val downEvent = KeyEvent(KeyEvent.ACTION_DOWN, keyCode)

@@ -708,6 +708,8 @@ class AirPodsService : Service() {
                     }
                     else -> {}
                 }
+                // Reset after acting to prevent repeated triggers on every packet
+                gestureDetector.reset()
             }
         }
     }

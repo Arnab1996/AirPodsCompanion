@@ -341,11 +341,30 @@ class AirPodsService : Service() {
         Log.d(TAG, "Renamed AirPods to: $newName")
     }
 
-    /** Start head tracking — DISABLED: takeover protocol disrupts AACP data flow */
+    /** Start head tracking — just send the start packet, NO takeover needed */
     fun startHeadTracking() {
-        Log.d(TAG, "Head tracking start requested (disabled — takeover disrupts core features)")
-        // The smart routing takeover protocol causes AirPods to stop sending
-        // battery, ear detection, and ANC data. Disabled until properly implemented.
+        // Standard start packet (matching Python prototype + LibrePods)
+        val startPacket = byteArrayOf(
+            0x04, 0x00, 0x04, 0x00, 0x17, 0x00, 0x00, 0x00,
+            0x10, 0x00, 0x10, 0x00, 0x08, 0xA1.toByte(), 0x02, 0x42,
+            0x0B, 0x08, 0x0E, 0x10, 0x02, 0x1A, 0x05, 0x01,
+            0x40, 0x9C.toByte(), 0x00, 0x00
+        )
+        _transport.sendRaw(startPacket)
+        Log.d(TAG, "Head tracking: standard start packet sent")
+
+        // Also try alternate start packet (for different firmware versions)
+        ioScope.launch {
+            kotlinx.coroutines.delay(300)
+            val altPacket = byteArrayOf(
+                0x04, 0x00, 0x04, 0x00, 0x17, 0x00, 0x00, 0x00,
+                0x10, 0x00, 0x0F, 0x00, 0x08, 0x73, 0x42, 0x0B,
+                0x08, 0x10, 0x10, 0x02, 0x1A, 0x05, 0x01,
+                0x40, 0x9C.toByte(), 0x00, 0x00
+            )
+            _transport.sendRaw(altPacket)
+            Log.d(TAG, "Head tracking: alternate start packet sent")
+        }
     }
 
     /** Stop head tracking */

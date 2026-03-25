@@ -300,14 +300,9 @@ fun DashboardScreen(vm: AirPodsViewModel) {
         // ═══ Head Gestures Section ═══
         SectionHeader("Head Gestures")
         SectionCard {
-            Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
-                Text("Head Gestures", style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
-                Text("Requires cross-device takeover protocol. Coming in a future update.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
-                    lineHeight = 16.sp)
-            }
+            SettingToggle("Head Gestures",
+                "Move your head up and down or side to side to respond to calls",
+                enabled = headTrackingOn, onToggle = { vm.toggleHeadTracking() })
             Divider()
             SettingInfo("Accept, Reply", "Up and Down")
             Divider()

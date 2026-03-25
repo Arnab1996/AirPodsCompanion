@@ -347,9 +347,7 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
                     service.setEarDetection(_edEnabled.value)
                     kotlinx.coroutines.delay(100)
                     service.setChimeVolume(_chimeVolume.value.toInt())
-                    // NOTE: Head tracking NOT auto-started on connect.
-                    // The takeover protocol disrupts normal AACP initialization.
-                    // User must manually toggle it from the dashboard after connection stabilizes.
+                    // Head tracking: user toggles manually from dashboard after core features are stable
                     Log.d(TAG, "Saved settings applied (staggered)")
                 }
                 if (state == AacpTransport.ConnectionState.FAILED ||

@@ -130,7 +130,7 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     /** In-Case Tone toggle state. */
     val inCaseTone: StateFlow<Boolean> = _inCaseTone.asStateFlow()
 
-    private val _headTracking = MutableStateFlow(false) // Always starts OFF — must be manually enabled
+    private val _headTracking = MutableStateFlow(prefs.getBoolean("head_tracking", false))
     /** Head Tracking / Spatial Audio toggle state. */
     val headTracking: StateFlow<Boolean> = _headTracking.asStateFlow()
 

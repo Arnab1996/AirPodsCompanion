@@ -341,54 +341,11 @@ class AirPodsService : Service() {
         Log.d(TAG, "Renamed AirPods to: $newName")
     }
 
-    /** Start head tracking — performs full device takeover then sends start packet */
-    @SuppressLint("MissingPermission")
+    /** Start head tracking — DISABLED: takeover protocol disrupts AACP data flow */
     fun startHeadTracking() {
-        val device = connectedBtDevice ?: run {
-            Log.w(TAG, "Cannot start head tracking: no connected device")
-            return
-        }
-        val targetMac = device.address
-
-        // Get real self MAC address (Android hides it behind 02:00:00:00:00:00)
-        val selfMac = getRealBluetoothMac()
-
-        Log.d(TAG, "Head tracking takeover: target=$targetMac self=$selfMac")
-
-        // Step 1: Claim connection ownership
-        transport.sendControlCommand(0x06, 0x01)
-        Log.d(TAG, "HT Step 1: OWNS_CONNECTION=1")
-
-        // Step 2: Send Media Information (smart routing)
-        val mediaInfo = me.arnabsaha.airpodscompanion.protocol.aap.SmartRoutingPackets
-            .createMediaInfoPacket(targetMac, selfMac)
-        _transport.sendRaw(mediaInfo)
-        Log.d(TAG, "HT Step 2: MediaInfo (${mediaInfo.size}B)")
-
-        // Step 3: Send Show UI (smart routing)
-        val showUI = me.arnabsaha.airpodscompanion.protocol.aap.SmartRoutingPackets
-            .createShowUIPacket(targetMac)
-        _transport.sendRaw(showUI)
-        Log.d(TAG, "HT Step 3: ShowUI (${showUI.size}B)")
-
-        // Step 4: Send Hijack Request
-        val hijack = me.arnabsaha.airpodscompanion.protocol.aap.SmartRoutingPackets
-            .createHijackRequestPacket(targetMac)
-        _transport.sendRaw(hijack)
-        Log.d(TAG, "HT Step 4: Hijack (${hijack.size}B)")
-
-        // Step 5: Wait 500ms then send head tracking start
-        ioScope.launch {
-            kotlinx.coroutines.delay(500)
-            val startPacket = byteArrayOf(
-                0x04, 0x00, 0x04, 0x00, 0x17, 0x00, 0x00, 0x00,
-                0x10, 0x00, 0x10, 0x00, 0x08, 0xA1.toByte(), 0x02, 0x42,
-                0x0B, 0x08, 0x0E, 0x10, 0x02, 0x1A, 0x05, 0x01,
-                0x40, 0x9C.toByte(), 0x00, 0x00
-            )
-            _transport.sendRaw(startPacket)
-            Log.d(TAG, "HT Step 5: Start packet sent")
-        }
+        Log.d(TAG, "Head tracking start requested (disabled — takeover disrupts core features)")
+        // The smart routing takeover protocol causes AirPods to stop sending
+        // battery, ear detection, and ANC data. Disabled until properly implemented.
     }
 
     /** Stop head tracking */

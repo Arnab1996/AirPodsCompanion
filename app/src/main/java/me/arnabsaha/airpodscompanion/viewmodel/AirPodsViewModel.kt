@@ -14,6 +14,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import me.arnabsaha.airpodscompanion.ble.transport.AacpTransport
 import me.arnabsaha.airpodscompanion.service.AacpBatteryState
@@ -97,6 +98,10 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     /** Transient error message for the UI to display (null = no error). */
     val connectionError: StateFlow<String?> = _connectionError.asStateFlow()
 
+    private val _isBluetoothProfileConnected = MutableStateFlow(false)
+    /** True when the AirPods have a system-level BT profile (A2DP) connected. */
+    val isBluetoothProfileConnected: StateFlow<Boolean> = _isBluetoothProfileConnected.asStateFlow()
+
     // ── Persisted settings (exposed as StateFlows for the UI) ────
 
     private val prefs: SharedPreferences =
@@ -133,6 +138,10 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     private val _headTracking = MutableStateFlow(prefs.getBoolean("head_tracking", false))
     /** Head Tracking / Spatial Audio toggle state. */
     val headTracking: StateFlow<Boolean> = _headTracking.asStateFlow()
+
+    private val _headTrackingLoading = MutableStateFlow(false)
+    /** True while head tracking is in the 30-second warm-up delay. */
+    val headTrackingLoading: StateFlow<Boolean> = _headTrackingLoading.asStateFlow()
 
     private val _chimeVolume = MutableStateFlow(prefs.getFloat("chime_volume", 50f))
     /** Chime volume (0-100). */
@@ -221,6 +230,8 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
 
     /** Toggle head tracking / spatial audio. Returns the new active state. */
     fun toggleHeadTracking() {
+        // Cancel any pending delayed start
+        _headTrackingLoading.value = false
         withService("toggleHeadTracking") { service ->
             val active = service.toggleHeadTracking()
             _headTracking.value = active
@@ -325,34 +336,55 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
         viewModelScope.launch {
             service.bondedAirPodsList.collect { _bondedAirPodsList.value = it }
         }
+        viewModelScope.launch {
+            service.isBluetoothProfileConnected.collect { _isBluetoothProfileConnected.value = it }
+        }
     }
 
     /**
-     * Apply all persisted settings to the service on first connection.
-     * This replaces the LaunchedEffect(Unit) block that was in DashboardScreen.
+     * Apply all persisted settings to the service on each connection.
+     * Uses a Job with 3-second debounce: if the connection drops within 3 seconds
+     * (common during reconnect cycles), the settings send is cancelled — no flooding.
+     * Each new CONNECTED state cancels any pending job and starts fresh.
      */
-    private var settingsApplied = false
+    private var applySettingsJob: Job? = null
 
     private fun applySavedSettings(service: AirPodsService) {
         viewModelScope.launch {
             service.connectionState.collect { state ->
-                if (state == AacpTransport.ConnectionState.CONNECTED && !settingsApplied) {
-                    settingsApplied = true
-                    // Stagger commands to avoid flooding the L2CAP channel
-                    kotlinx.coroutines.delay(500)
-                    service.setConversationalAwareness(_caEnabled.value)
-                    kotlinx.coroutines.delay(100)
-                    service.setAdaptiveVolume(_avEnabled.value)
-                    kotlinx.coroutines.delay(100)
-                    service.setEarDetection(_edEnabled.value)
-                    kotlinx.coroutines.delay(100)
-                    service.setChimeVolume(_chimeVolume.value.toInt())
-                    // Head tracking: user toggles manually from dashboard after core features are stable
-                    Log.d(TAG, "Saved settings applied (staggered)")
-                }
-                if (state == AacpTransport.ConnectionState.FAILED ||
-                    state == AacpTransport.ConnectionState.DISCONNECTED) {
-                    settingsApplied = false
+                if (state == AacpTransport.ConnectionState.CONNECTED) {
+                    applySettingsJob?.cancel()
+                    applySettingsJob = viewModelScope.launch {
+                        // Wait for connection to stabilize before sending
+                        kotlinx.coroutines.delay(3000)
+                        if (service.connectionState.value != AacpTransport.ConnectionState.CONNECTED) return@launch
+                        service.setConversationalAwareness(_caEnabled.value)
+                        kotlinx.coroutines.delay(200)
+                        if (service.connectionState.value != AacpTransport.ConnectionState.CONNECTED) return@launch
+                        service.setAdaptiveVolume(_avEnabled.value)
+                        kotlinx.coroutines.delay(200)
+                        if (service.connectionState.value != AacpTransport.ConnectionState.CONNECTED) return@launch
+                        service.setEarDetection(_edEnabled.value)
+                        kotlinx.coroutines.delay(200)
+                        if (service.connectionState.value != AacpTransport.ConnectionState.CONNECTED) return@launch
+                        service.setChimeVolume(_chimeVolume.value.toInt())
+                        Log.d(TAG, "Saved settings applied (staggered)")
+
+                        // Head tracking: delayed start after 30s to let the L2CAP
+                        // channel stabilize with battery/ear data first.
+                        if (_headTracking.value) {
+                            _headTrackingLoading.value = true
+                            Log.d(TAG, "Head tracking: waiting 30s for stable connection...")
+                            kotlinx.coroutines.delay(30_000)
+                            if (service.connectionState.value != AacpTransport.ConnectionState.CONNECTED) {
+                                _headTrackingLoading.value = false
+                                return@launch
+                            }
+                            service.startHeadTracking()
+                            _headTrackingLoading.value = false
+                            Log.d(TAG, "Head tracking: started after 30s delay")
+                        }
+                    }
                 }
             }
         }

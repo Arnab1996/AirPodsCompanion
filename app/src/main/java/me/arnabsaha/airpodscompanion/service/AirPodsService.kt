@@ -4,10 +4,13 @@ import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
+import android.bluetooth.BluetoothA2dp
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -17,6 +20,7 @@ import android.os.Binder
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.telecom.TelecomManager
 import android.util.Log
 import android.view.KeyEvent
 import kotlinx.coroutines.CoroutineScope
@@ -130,10 +134,18 @@ class AirPodsService : Service() {
     // List of all bonded AirPods devices
     private val _bondedAirPodsList = MutableStateFlow<List<BondedAirPods>>(emptyList())
     val bondedAirPodsList: StateFlow<List<BondedAirPods>> = _bondedAirPodsList.asStateFlow()
+    private var caInitialVolume: Int = -1  // Saved volume before CA lowers it
+    private var caPreVoiceAncMode: Byte = NoiseControlMode.NOISE_CANCELLATION // ANC mode before CA switched to transparency
     private var headTrackingActive = false
     private var connectedBtDevice: BluetoothDevice? = null
     private val gestureDetector = HeadGestureDetector()
     private lateinit var connectionPopup: ConnectionPopup
+
+    // A2DP profile connection state — tracks whether Android BT system has the AirPods connected
+    private val _isBluetoothProfileConnected = MutableStateFlow(false)
+    val isBluetoothProfileConnected: StateFlow<Boolean> = _isBluetoothProfileConnected.asStateFlow()
+    private var a2dpProxy: BluetoothA2dp? = null
+    private var a2dpUnlatchRunnable: Runnable? = null
 
     /** All detected AirPods, keyed by BLE address */
     val detectedDevices: StateFlow<Map<String, AirPodsAdvertisement>>
@@ -167,12 +179,78 @@ class AirPodsService : Service() {
                     Log.d(TAG, "Bluetooth turned OFF")
                     scanner.stopScan()
                     _transport.disconnect()
+                    _isBluetoothProfileConnected.value = false
+                    a2dpUnlatchRunnable?.let { handler.removeCallbacks(it) }
+                    a2dpUnlatchRunnable = null
                 }
                 BluetoothAdapter.STATE_ON -> {
                     Log.d(TAG, "Bluetooth turned ON — restarting")
                     scanner.startScan()
                     handler.postDelayed({ autoConnect() }, 2000) // Delay for BT stack to initialize
+                    // Re-acquire A2DP proxy
+                    setupA2dpMonitor()
                 }
+            }
+        }
+    }
+
+    // A2DP connection state receiver — tracks system-level audio profile connection
+    // Uses a "latch" approach: once A2DP is seen connected, stays true to avoid
+    // dashboard flapping when A2DP briefly disconnects/reconnects (common on AirPods).
+    // Un-latches after sustained disconnect (10s debounce) — handles case lid closed.
+    private val a2dpStateReceiver = object : BroadcastReceiver() {
+        @SuppressLint("MissingPermission")
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action != BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED) return
+            val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+            val state = intent.getIntExtra(BluetoothProfile.EXTRA_STATE, BluetoothProfile.STATE_DISCONNECTED)
+            val targetAddress = connectedBtDevice?.address
+
+            Log.d(TAG, "A2DP state changed: ${device.name} (${device.address}) → $state")
+
+            if (device.address == targetAddress) {
+                if (state == BluetoothProfile.STATE_CONNECTED) {
+                    // Cancel any pending un-latch
+                    a2dpUnlatchRunnable?.let { handler.removeCallbacks(it) }
+                    a2dpUnlatchRunnable = null
+
+                    _isBluetoothProfileConnected.value = true
+                    Log.d(TAG, "A2DP profile CONNECTED for target AirPods (latched)")
+
+                    // If AACP is already connected but we haven't received battery data yet,
+                    // re-send notification request + ear detection enable to trigger the data flow.
+                    if (_transport.isConnected && _aacpBattery.value == null) {
+                        Log.d(TAG, "A2DP up + AACP up but no battery yet — re-requesting notifications")
+                        requestNotificationsAndEarDetection()
+                    }
+                } else if (state == BluetoothProfile.STATE_DISCONNECTED) {
+                    // Debounced un-latch: if A2DP stays disconnected for 10s, hide dashboard.
+                    // Brief flaps during reconnect (0 → 1 → 2) won't trigger this.
+                    a2dpUnlatchRunnable?.let { handler.removeCallbacks(it) }
+                    val runnable = Runnable {
+                        Log.d(TAG, "A2DP sustained disconnect — un-latching")
+                        _isBluetoothProfileConnected.value = false
+                        _aacpBattery.value = null // Clear stale battery data
+                    }
+                    a2dpUnlatchRunnable = runnable
+                    handler.postDelayed(runnable, 10_000)
+                }
+            }
+        }
+    }
+
+    // A2DP profile service listener — for initial state check
+    private val a2dpProfileListener = object : BluetoothProfile.ServiceListener {
+        @SuppressLint("MissingPermission")
+        override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
+            if (profile != BluetoothProfile.A2DP) return
+            a2dpProxy = proxy as BluetoothA2dp
+            checkA2dpConnectionState()
+        }
+
+        override fun onServiceDisconnected(profile: Int) {
+            if (profile == BluetoothProfile.A2DP) {
+                a2dpProxy = null
             }
         }
     }
@@ -188,11 +266,18 @@ class AirPodsService : Service() {
         // Register BT state receiver
         registerReceiver(bluetoothStateReceiver, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED))
 
+        // Register A2DP state receiver
+        registerReceiver(a2dpStateReceiver, IntentFilter(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED))
+
+        // Setup A2DP profile proxy for initial state check
+        setupA2dpMonitor()
+
         scanner = AirPodsScanner(this)
         scanner.startScan()
         startPruneLoop()
         observeConnectionState()
         startPacketDispatcher()
+        setupWearSync()
 
         // Auto-connect to bonded AirPods on service start
         autoConnect()
@@ -213,6 +298,9 @@ class AirPodsService : Service() {
         serviceJob.cancel()
         connectionPopup.dismiss()
         try { unregisterReceiver(bluetoothStateReceiver) } catch (_: Exception) {}
+        try { unregisterReceiver(a2dpStateReceiver) } catch (_: Exception) {}
+        releaseA2dpProxy()
+        wearCommandCleanup?.invoke()
         scanner.stopScan()
         _transport.disconnect()
         super.onDestroy()
@@ -282,6 +370,9 @@ class AirPodsService : Service() {
         }
 
         _transport.connect(device)
+
+        // Check if this device already has A2DP connected
+        checkA2dpConnectionState()
     }
 
     /**
@@ -343,6 +434,7 @@ class AirPodsService : Service() {
 
     /** Start head tracking — just send the start packet, NO takeover needed */
     fun startHeadTracking() {
+        headTrackingActive = true
         // Standard start packet (matching Python prototype + LibrePods)
         val startPacket = byteArrayOf(
             0x04, 0x00, 0x04, 0x00, 0x17, 0x00, 0x00, 0x00,
@@ -385,6 +477,31 @@ class AirPodsService : Service() {
         return nearest?.caseBattery ?: -1
     }
 
+    /**
+     * Re-send notification request + ear detection enable to trigger battery/ear data flow.
+     * Called when A2DP connects after AACP is already up — the AirPods firmware only sends
+     * battery/ear packets in the initial burst when A2DP is established.
+     */
+    fun requestNotificationsAndEarDetection() {
+        serviceScope.launch {
+            kotlinx.coroutines.delay(500) // Brief delay for A2DP to stabilize
+            if (!_transport.isConnected) return@launch
+
+            // Re-send notification enable (same as handshake step 3)
+            _transport.sendRaw(
+                me.arnabsaha.airpodscompanion.protocol.constants.AacpConstants.REQUEST_NOTIFICATIONS
+            )
+            Log.d(TAG, "Re-sent notification request")
+
+            kotlinx.coroutines.delay(200)
+            if (!_transport.isConnected) return@launch
+
+            // Re-send ear detection enable
+            transport.sendControlCommand(ControlCommandId.EAR_DETECTION, 0x01)
+            Log.d(TAG, "Re-sent ear detection enable")
+        }
+    }
+
     /** Toggle head tracking with gesture detection */
     fun toggleHeadTracking(): Boolean {
         Log.d(TAG, "toggleHeadTracking called, current=$headTrackingActive")
@@ -406,6 +523,29 @@ class AirPodsService : Service() {
 
     private var hasConnectedOnce = false
 
+    private fun setupA2dpMonitor() {
+        val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter ?: return
+        adapter.getProfileProxy(this, a2dpProfileListener, BluetoothProfile.A2DP)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun checkA2dpConnectionState() {
+        val proxy = a2dpProxy ?: return
+        val targetAddress = connectedBtDevice?.address ?: return
+        val connected = proxy.connectedDevices.any { it.address == targetAddress }
+        if (connected) {
+            _isBluetoothProfileConnected.value = true
+        }
+        Log.d(TAG, "A2DP check: ${if (connected) "CONNECTED" else "NOT CONNECTED"} for $targetAddress")
+    }
+
+    private fun releaseA2dpProxy() {
+        val proxy = a2dpProxy ?: return
+        val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter ?: return
+        adapter.closeProfileProxy(BluetoothProfile.A2DP, proxy)
+        a2dpProxy = null
+    }
+
     private fun observeConnectionState() {
         serviceScope.launch {
             _transport.connectionState.collect { state ->
@@ -413,6 +553,17 @@ class AirPodsService : Service() {
                     AacpTransport.ConnectionState.CONNECTED -> {
                         scanner.stopScan()
                         Log.d(TAG, "Stopped BLE scan (connected)")
+
+                        // Safety net: if no battery data arrives within 8 seconds of
+                        // CONNECTED, re-send notification request to trigger data flow.
+                        // This handles the race where AACP connects before A2DP.
+                        serviceScope.launch {
+                            kotlinx.coroutines.delay(8000)
+                            if (_transport.isConnected && _aacpBattery.value == null) {
+                                Log.d(TAG, "No battery data after 8s — re-requesting")
+                                requestNotificationsAndEarDetection()
+                            }
+                        }
 
                         // Only show popup on first connection, not reconnects
                         if (!hasConnectedOnce) {
@@ -442,6 +593,7 @@ class AirPodsService : Service() {
                             Log.d(TAG, "Restarted BLE scan (connection failed)")
                         }
                         hasConnectedOnce = false
+                        _isBluetoothProfileConnected.value = false // Reset A2DP latch
                     }
                     else -> {}
                 }
@@ -531,6 +683,7 @@ class AirPodsService : Service() {
 
         _aacpBattery.value = state
         Log.d(TAG, "Battery: L=${state.leftLevel}% R=${state.rightLevel}% C=${state.caseLevel}%")
+        syncToWatch()
 
         // Update system Bluetooth metadata (best-effort)
         // Update notification with battery
@@ -567,6 +720,7 @@ class AirPodsService : Service() {
 
         _earState.value = newState
         Log.d(TAG, "Ear: L=${if (newState.leftInEar) "IN" else "OUT"} R=${if (newState.rightInEar) "IN" else "OUT"}")
+        syncToWatch()
 
         // Auto play/pause logic:
         // PAUSE: if ANY ear was in and is now removed (either one or both)
@@ -595,11 +749,11 @@ class AirPodsService : Service() {
         if (raw.size < 8) return
 
         val commandId = raw[6]
+        val value = raw[7]
         when (commandId) {
             ControlCommandId.LISTENING_MODE -> {
-                val mode = raw[7]
-                _ancMode.value = mode
-                val modeName = when (mode) {
+                _ancMode.value = value
+                val modeName = when (value) {
                     NoiseControlMode.OFF -> "Off"
                     NoiseControlMode.NOISE_CANCELLATION -> "ANC"
                     NoiseControlMode.TRANSPARENCY -> "Transparency"
@@ -607,17 +761,80 @@ class AirPodsService : Service() {
                     else -> "Unknown"
                 }
                 Log.d(TAG, "ANC mode: $modeName")
+                syncToWatch()
             }
-            else -> Log.d(TAG, "Control cmd: 0x${"%02X".format(commandId)}")
+            ControlCommandId.CONVERSATION_AWARENESS -> {
+                val state = if (value == 0x01.toByte()) "ON" else "OFF"
+                Log.d(TAG, "CA confirmed: $state (0x${"%02X".format(value)})")
+            }
+            ControlCommandId.ADAPTIVE_VOLUME -> {
+                val state = if (value == 0x01.toByte()) "ON" else "OFF"
+                Log.d(TAG, "Adaptive Volume confirmed: $state (0x${"%02X".format(value)})")
+            }
+            ControlCommandId.EAR_DETECTION -> {
+                val state = if (value == 0x01.toByte()) "ON" else "OFF"
+                Log.d(TAG, "Ear Detection confirmed: $state (0x${"%02X".format(value)})")
+            }
+            else -> Log.d(TAG, "Control cmd: 0x${"%02X".format(commandId)} val=0x${"%02X".format(value)}")
         }
     }
 
     // ═══ Conversational Awareness (opcode 0x4B) ═══
+    // The AirPods send voice detection events via this opcode.
+    // The HOST app must control the system volume — AirPods don't do it over A2DP.
+    // flag 0x01 = voice detected → lower volume
+    // flag 0x08 = CA disabled
+    // flag 0x09 = CA enabled
+    // other    = voice ended → restore volume
     private fun handleConversationalAwareness(packet: AacpPacket) {
         val raw = packet.rawBytes
         if (raw.size < 10) return
-        val level = raw[9].toInt() and 0xFF
-        Log.d(TAG, "Conversational awareness level: $level")
+        val flag = raw[9].toInt() and 0xFF
+
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
+        when (flag) {
+            0x01 -> {
+                // Voice detected — save volume + ANC mode, switch to transparency, lower volume
+                Log.d(TAG, "CA: voice detected — switching to transparency + lowering volume")
+                if (caInitialVolume == -1) {
+                    caInitialVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+                    caPreVoiceAncMode = _ancMode.value
+                    Log.d(TAG, "CA: saved volume=$caInitialVolume, ancMode=0x${"%02X".format(caPreVoiceAncMode)}")
+                }
+                // Switch to transparency so user can hear conversation
+                setNoiseControlMode(NoiseControlMode.TRANSPARENCY)
+                // Lower volume to 20%
+                val target = (caInitialVolume * 0.20).toInt().coerceAtLeast(1)
+                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
+                Log.d(TAG, "CA: volume lowered to $target")
+            }
+            0x08 -> {
+                Log.d(TAG, "CA: disabled")
+                restoreCaState(audioManager)
+            }
+            0x09 -> {
+                Log.d(TAG, "CA: enabled")
+            }
+            else -> {
+                // Voice ended or other state — restore volume + ANC mode
+                if (caInitialVolume != -1) {
+                    Log.d(TAG, "CA: voice ended — restoring volume=$caInitialVolume, ancMode=0x${"%02X".format(caPreVoiceAncMode)}")
+                    restoreCaState(audioManager)
+                } else {
+                    Log.d(TAG, "CA level: $flag")
+                }
+            }
+        }
+    }
+
+    private fun restoreCaState(audioManager: AudioManager) {
+        if (caInitialVolume != -1) {
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, caInitialVolume, 0)
+            setNoiseControlMode(caPreVoiceAncMode)
+            Log.d(TAG, "CA: restored volume=$caInitialVolume, ancMode=0x${"%02X".format(caPreVoiceAncMode)}")
+            caInitialVolume = -1
+        }
     }
 
     // ═══ Stem Press (opcode 0x19) ═══
@@ -699,17 +916,17 @@ class AirPodsService : Service() {
             if (gesture != HeadGestureDetector.Gesture.NONE) {
                 when (gesture) {
                     HeadGestureDetector.Gesture.NOD_YES -> {
-                        Log.d(TAG, "HEAD GESTURE: NOD (YES)")
-                        sendMediaKey(KeyEvent.KEYCODE_CALL)
+                        Log.d(TAG, "HEAD GESTURE: NOD (YES) — answering call")
+                        answerCall()
                     }
                     HeadGestureDetector.Gesture.SHAKE_NO -> {
-                        Log.d(TAG, "HEAD GESTURE: SHAKE (NO)")
-                        sendMediaKey(KeyEvent.KEYCODE_ENDCALL)
+                        Log.d(TAG, "HEAD GESTURE: SHAKE (NO) — declining call")
+                        declineCall()
                     }
                     else -> {}
                 }
-                // Reset after acting to prevent repeated triggers on every packet
-                gestureDetector.reset()
+                // Clear peaks but keep calibration — prevents re-trigger on noise
+                gestureDetector.clearAfterDetection()
             }
         }
     }
@@ -766,6 +983,58 @@ class AirPodsService : Service() {
         audioManager.dispatchMediaKeyEvent(upEvent)
     }
 
+    @SuppressLint("MissingPermission")
+    private fun answerCall() {
+        try {
+            val telecom = getSystemService(Context.TELECOM_SERVICE) as TelecomManager
+            telecom.acceptRingingCall()
+            Log.d(TAG, "Call answered via TelecomManager")
+        } catch (e: Exception) {
+            Log.w(TAG, "TelecomManager.acceptRingingCall failed: ${e.message}, trying media key fallback")
+            sendMediaKey(KeyEvent.KEYCODE_HEADSETHOOK)
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun declineCall() {
+        try {
+            val telecom = getSystemService(Context.TELECOM_SERVICE) as TelecomManager
+            @Suppress("DEPRECATION")
+            telecom.endCall()
+            Log.d(TAG, "Call declined via TelecomManager")
+        } catch (e: Exception) {
+            Log.w(TAG, "TelecomManager.endCall failed: ${e.message}")
+        }
+    }
+
+    // ═══ Wear OS Data Sync ═══
+
+    private var wearCommandCleanup: (() -> Unit)? = null
+
+    private fun setupWearSync() {
+        // Listen for commands from the watch (ANC toggles)
+        wearCommandCleanup = me.arnabsaha.airpodscompanion.wear.WearDataSender.listenForCommands(this) { cmd ->
+            Log.d(TAG, "Watch command: $cmd")
+            when (cmd) {
+                "anc_off" -> setNoiseControlMode(me.arnabsaha.airpodscompanion.protocol.constants.NoiseControlMode.OFF)
+                "anc_on" -> setNoiseControlMode(me.arnabsaha.airpodscompanion.protocol.constants.NoiseControlMode.NOISE_CANCELLATION)
+                "anc_transparency" -> setNoiseControlMode(me.arnabsaha.airpodscompanion.protocol.constants.NoiseControlMode.TRANSPARENCY)
+                "anc_adaptive" -> setNoiseControlMode(me.arnabsaha.airpodscompanion.protocol.constants.NoiseControlMode.ADAPTIVE)
+            }
+        }
+    }
+
+    private fun syncToWatch() {
+        me.arnabsaha.airpodscompanion.wear.WearDataSender.syncState(
+            this,
+            connected = _transport.isConnected,
+            deviceName = _bondedDeviceName.value,
+            battery = _aacpBattery.value,
+            ancMode = _ancMode.value,
+            earState = _earState.value
+        )
+    }
+
     private fun updateNotification(text: String) {
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NOTIFICATION_ID, buildNotification(text))
@@ -803,10 +1072,18 @@ class AirPodsService : Service() {
             "L: ${battery.leftLevel}%  R: ${battery.rightLevel}%  Case: ${if (battery.caseLevel >= 0) "${battery.caseLevel}%" else "—"}"
         } else text
 
+        val tapIntent = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, me.arnabsaha.airpodscompanion.MainActivity::class.java)
+                .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
         return Notification.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(content)
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
+            .setContentIntent(tapIntent)
             .setOngoing(true)
             .build()
     }

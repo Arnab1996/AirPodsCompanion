@@ -27,12 +27,12 @@ class HeadGestureDetector {
         private const val TAG = "HeadGesture"
         private const val CALIBRATION_SAMPLES = 10
         private const val BUFFER_SIZE = 30
-        private const val PEAK_THRESHOLD = 400
-        private const val DIRECTION_CHANGE_THRESHOLD = 160
-        private const val MIN_EXTREMES_FAST = 4
-        private const val MIN_EXTREMES_NORMAL = 3
-        private const val CONFIDENCE_THRESHOLD = 0.65f
-        private const val GESTURE_COOLDOWN_MS = 2000L
+        private const val PEAK_THRESHOLD = 800
+        private const val DIRECTION_CHANGE_THRESHOLD = 300
+        private const val MIN_EXTREMES_FAST = 5
+        private const val MIN_EXTREMES_NORMAL = 4
+        private const val CONFIDENCE_THRESHOLD = 0.80f
+        private const val GESTURE_COOLDOWN_MS = 5000L
         private const val ORIENTATION_OFFSET = 5500
     }
 
@@ -232,6 +232,19 @@ class HeadGestureDetector {
         horizPeaks.clear()
         vertPeaks.clear()
         peakIntervals.clear()
+    }
+
+    /**
+     * Clear after a detected gesture — keeps calibration intact so the detector
+     * doesn't immediately re-trigger on noise during recalibration.
+     */
+    fun clearAfterDetection() {
+        horizBuffer.clear()
+        vertBuffer.clear()
+        clearPeaks()
+        horizIncreasing = null
+        vertIncreasing = null
+        _lastGesture.value = Gesture.NONE
     }
 
     fun reset() {

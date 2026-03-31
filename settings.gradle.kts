@@ -24,3 +24,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "AirPodsCompanion"
 include(":app")
+include(":wear")

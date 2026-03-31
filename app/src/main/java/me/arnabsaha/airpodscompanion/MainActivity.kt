@@ -139,11 +139,12 @@ fun MainScreen(vm: AirPodsViewModel) {
         DisposableEffect(Unit) { onDispose { vm.unbindService() } }
 
         val connState by vm.connectionState.collectAsState()
+        val btProfileConnected by vm.isBluetoothProfileConnected.collectAsState()
 
         // Minimum animation display time — show connecting for at least 2.5s
         var showDashboard by remember { mutableStateOf(false) }
-        LaunchedEffect(connState) {
-            if (connState == AacpTransport.ConnectionState.CONNECTED) {
+        LaunchedEffect(connState, btProfileConnected) {
+            if (connState == AacpTransport.ConnectionState.CONNECTED && btProfileConnected) {
                 if (!showDashboard) {
                     kotlinx.coroutines.delay(1500) // Brief animation, then show dashboard
                     showDashboard = true
@@ -154,10 +155,10 @@ fun MainScreen(vm: AirPodsViewModel) {
         }
 
         when {
-            showDashboard && connState == AacpTransport.ConnectionState.CONNECTED -> DashboardScreen(vm)
+            showDashboard && connState == AacpTransport.ConnectionState.CONNECTED && btProfileConnected -> DashboardScreen(vm)
             connState == AacpTransport.ConnectionState.DISCONNECTED ||
             connState == AacpTransport.ConnectionState.FAILED -> DevicePickerScreen(vm)
-            else -> ConnectingScreen(vm, connState)
+            else -> ConnectingScreen(vm, connState, btProfileConnected)
         }
     } else {
         PermissionsScreen(perms, Settings.canDrawOverlays(context))
@@ -185,6 +186,7 @@ fun DashboardScreen(vm: AirPodsViewModel) {
     val sleepDetection by vm.sleepDetection.collectAsState()
     val inCaseTone by vm.inCaseTone.collectAsState()
     val headTrackingOn by vm.headTracking.collectAsState()
+    val headTrackingLoading by vm.headTrackingLoading.collectAsState()
     val chimeVolume by vm.chimeVolume.collectAsState()
     val stemAction by vm.stemAction.collectAsState()
 
@@ -301,8 +303,25 @@ fun DashboardScreen(vm: AirPodsViewModel) {
         SectionHeader("Head Gestures")
         SectionCard {
             SettingToggle("Head Gestures",
-                "Move your head up and down or side to side to respond to calls",
+                if (headTrackingLoading) "Starting in a moment…"
+                else "Move your head up and down or side to side to respond to calls",
                 enabled = headTrackingOn, onToggle = { vm.toggleHeadTracking() })
+            if (headTrackingLoading) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    androidx.compose.material3.CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text("Warming up — battery & ear detection first",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                }
+            }
             Divider()
             SettingInfo("Accept, Reply", "Up and Down")
             Divider()
@@ -698,7 +717,7 @@ fun SectionCard(content: @Composable () -> Unit) {
 // ═══════════════════════════════════════════════════════════════
 
 @Composable
-fun ConnectingScreen(vm: AirPodsViewModel, state: AacpTransport.ConnectionState) {
+fun ConnectingScreen(vm: AirPodsViewModel, state: AacpTransport.ConnectionState, btProfileConnected: Boolean = false) {
     val deviceName by vm.bondedDeviceName.collectAsState()
     val error by vm.connectionError.collectAsState()
     val isConnected = state == AacpTransport.ConnectionState.CONNECTED
@@ -746,19 +765,21 @@ fun ConnectingScreen(vm: AirPodsViewModel, state: AacpTransport.ConnectionState)
         Spacer(Modifier.height(8.dp))
 
         Text(
-            text = when (state) {
-                AacpTransport.ConnectionState.CONNECTING -> "Connecting..."
-                AacpTransport.ConnectionState.HANDSHAKING -> "Setting up..."
-                AacpTransport.ConnectionState.RECONNECTING -> "Reconnecting..."
-                AacpTransport.ConnectionState.CONNECTED -> "Connected!"
-                AacpTransport.ConnectionState.FAILED -> "Connection failed"
+            text = when {
+                state == AacpTransport.ConnectionState.CONNECTED && !btProfileConnected -> "Waiting for Bluetooth audio..."
+                state == AacpTransport.ConnectionState.CONNECTING -> "Connecting..."
+                state == AacpTransport.ConnectionState.HANDSHAKING -> "Setting up..."
+                state == AacpTransport.ConnectionState.RECONNECTING -> "Reconnecting..."
+                state == AacpTransport.ConnectionState.CONNECTED -> "Connected!"
+                state == AacpTransport.ConnectionState.FAILED -> "Connection failed"
                 else -> "Searching..."
             },
             style = MaterialTheme.typography.bodyLarge,
-            color = when (state) {
-                AacpTransport.ConnectionState.CONNECTED -> AppleGreen
-                AacpTransport.ConnectionState.FAILED -> AppleRed
-                AacpTransport.ConnectionState.RECONNECTING -> AppleOrange
+            color = when {
+                state == AacpTransport.ConnectionState.CONNECTED && !btProfileConnected -> AppleOrange
+                state == AacpTransport.ConnectionState.CONNECTED -> AppleGreen
+                state == AacpTransport.ConnectionState.FAILED -> AppleRed
+                state == AacpTransport.ConnectionState.RECONNECTING -> AppleOrange
                 else -> MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
             }
         )

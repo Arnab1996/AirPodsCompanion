@@ -5,13 +5,13 @@ plugins {
 }
 
 android {
-    namespace = "me.arnabsaha.airpodscompanion"
+    namespace = "me.arnabsaha.airpodscompanion.wear"
     compileSdk = 36
 
     defaultConfig {
         applicationId = "me.arnabsaha.airpodscompanion"
-        minSdk = 29
-        targetSdk = 36
+        minSdk = 30
+        targetSdk = 34
         versionCode = 1
         versionName = "0.1.0"
     }
@@ -42,31 +42,22 @@ android {
 }
 
 dependencies {
+    // Wear OS Compose
+    implementation(libs.wear.compose.material)
+    implementation(libs.wear.compose.foundation)
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.ui)
+    implementation(libs.androidx.ui.tooling.preview)
+    implementation(libs.androidx.activity.compose)
+    debugImplementation(libs.androidx.ui.tooling)
+
     // Core
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation(libs.androidx.lifecycle.viewmodel.compose)
 
-    // Compose
-    implementation(libs.androidx.activity.compose)
-    implementation(platform(libs.androidx.compose.bom))
-    implementation(libs.androidx.ui)
-    implementation(libs.androidx.ui.graphics)
-    implementation(libs.androidx.ui.tooling.preview)
-    implementation(libs.androidx.material3)
-    implementation(libs.androidx.material.icons.extended)
-    implementation(libs.androidx.navigation.compose)
-    debugImplementation(libs.androidx.ui.tooling)
-
-    // Permissions
-    implementation(libs.accompanist.permissions)
-
-    // Hidden API bypass (for L2CAP socket creation via reflection)
-    implementation(libs.hiddenapibypass)
-
-    // Wearable Data Layer (sync state to Wear OS companion)
+    // Wearable Data Layer
     implementation(libs.play.services.wearable)
 
-    // Testing
-    testImplementation("junit:junit:4.13.2")
+    // Watch face complications
+    implementation(libs.wear.watchface.complications.data.source.ktx)
 }

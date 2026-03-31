@@ -38,8 +38,9 @@ class AacpTransport {
         private const val TAG = "AacpTransport"
         private const val CONNECT_TIMEOUT_MS = 8_000L
         private const val READ_BUFFER_SIZE = 2048
-        private const val MAX_RECONNECT_ATTEMPTS = 5
+        private const val MAX_RECONNECT_ATTEMPTS = 10
         private const val RECONNECT_BASE_DELAY_MS = 1_000L
+        private const val RECONNECT_MAX_DELAY_MS = 15_000L
     }
 
     enum class ConnectionState {
@@ -291,7 +292,7 @@ class AacpTransport {
         reconnectJob?.cancel()
         reconnectJob = scope.launch {
             for (attempt in 1..MAX_RECONNECT_ATTEMPTS) {
-                val delayMs = RECONNECT_BASE_DELAY_MS * (1L shl (attempt - 1))
+                val delayMs = (RECONNECT_BASE_DELAY_MS * (1L shl (attempt - 1))).coerceAtMost(RECONNECT_MAX_DELAY_MS)
                 Log.d(TAG, "Reconnect attempt $attempt/$MAX_RECONNECT_ATTEMPTS in ${delayMs}ms")
                 _connectionState.value = ConnectionState.RECONNECTING
 

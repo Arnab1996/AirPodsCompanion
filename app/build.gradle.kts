@@ -67,6 +67,12 @@ dependencies {
     // Wearable Data Layer (sync state to Wear OS companion)
     implementation(libs.play.services.wearable)
 
+    // Glance widgets (home screen + lock screen)
+    implementation(libs.glance.appwidget)
+
+    // Android Auto
+    implementation(libs.car.app)
+
     // Testing
     testImplementation("junit:junit:4.13.2")
 }

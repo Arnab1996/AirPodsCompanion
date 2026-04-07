@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="384dp"
+    android:height="384dp"
+    android:viewportWidth="384"
+    android:viewportHeight="384">
+
+    <!-- Background circle (watch shape) -->
+    <path
+        android:fillColor="#1C1C1E"
+        android:pathData="M192,0 C298,0 384,86 384,192 C384,298 298,384 192,384 C86,384 0,298 0,192 C0,86 86,0 192,0Z" />
+
+    <!-- Bluetooth icon -->
+    <path
+        android:fillColor="#007AFF"
+        android:pathData="M192,112 L192,272 L232,232 L192,192 L232,152 Z"
+        android:strokeWidth="0" />
+    <path
+        android:strokeColor="#007AFF"
+        android:strokeWidth="8"
+        android:fillColor="#00000000"
+        android:pathData="M152,152 L232,232 M152,232 L232,152"
+        android:strokeLineCap="round" />
+
+    <!-- "AirBridge" label -->
+    <group>
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M152,300 L152,300" />
+    </group>
+</vector>

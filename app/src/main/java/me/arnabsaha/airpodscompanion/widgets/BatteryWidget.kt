@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.widget.RemoteViews
+import kotlinx.coroutines.launch
 import me.arnabsaha.airpodscompanion.R
 
 /**
@@ -21,6 +22,19 @@ class BatteryWidget : AppWidgetProvider() {
         const val EXTRA_CASE = "case"
 
         fun sendUpdate(context: Context, left: Int, right: Int, case_: Int) {
+            // Write to prefs for Glance + Android Auto to read
+            context.getSharedPreferences("airbridge_settings", Context.MODE_PRIVATE)
+                .edit()
+                .putInt("widget_left", left)
+                .putInt("widget_right", right)
+                .putInt("widget_case", case_)
+                .apply()
+
+            // Update Glance widget
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                GlanceBatteryWidget().updateAll(context)
+            }
+
             val intent = Intent(ACTION_UPDATE).apply {
                 setPackage(context.packageName)
                 putExtra(EXTRA_LEFT, left)

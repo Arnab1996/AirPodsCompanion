@@ -97,6 +97,7 @@ class AirPodsService : Service() {
         private const val PRUNE_INTERVAL_MS = 10_000L
         private const val STALE_THRESHOLD_MS = 30_000L
         const val ACTION_SHOW_POPUP = "me.arnabsaha.airpodscompanion.SHOW_POPUP"
+        const val ACTION_CYCLE_ANC = "me.arnabsaha.airpodscompanion.CYCLE_ANC"
     }
 
     inner class LocalBinder : Binder() {
@@ -109,6 +110,7 @@ class AirPodsService : Service() {
     private val ioScope = CoroutineScope(Dispatchers.Default + serviceJob) // For head tracking processing
     private lateinit var scanner: AirPodsScanner
     private val handler = Handler(Looper.getMainLooper())
+    private lateinit var batteryAlertManager: me.arnabsaha.airpodscompanion.alerts.BatteryAlertManager
 
     // AACP Transport — the core protocol connection
     private val _transport = AacpTransport()
@@ -125,6 +127,10 @@ class AirPodsService : Service() {
     // Device info parsed from opcode 0x1D
     private val _deviceInfo = MutableStateFlow<DeviceInfo?>(null)
     val deviceInfo: StateFlow<DeviceInfo?> = _deviceInfo.asStateFlow()
+
+    // LE Audio capability detected on connect
+    private val _leAudioCapability = MutableStateFlow<me.arnabsaha.airpodscompanion.ble.LeAudioCapability?>(null)
+    val leAudioCapability: StateFlow<me.arnabsaha.airpodscompanion.ble.LeAudioCapability?> = _leAudioCapability.asStateFlow()
 
     // Ear detection state
     private val _earState = MutableStateFlow(EarState())
@@ -283,6 +289,8 @@ class AirPodsService : Service() {
         startForeground(NOTIFICATION_ID, buildServiceNotification())
 
         connectionPopup = ConnectionPopup(this)
+        batteryAlertManager = me.arnabsaha.airpodscompanion.alerts.BatteryAlertManager(this)
+        batteryAlertManager.createNotificationChannel()
 
         // Register BT state receiver
         registerReceiver(bluetoothStateReceiver, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED))
@@ -316,6 +324,12 @@ class AirPodsService : Service() {
             return START_STICKY
         }
 
+        // Handle Cycle ANC action from notification / Android Auto
+        if (intent?.action == ACTION_CYCLE_ANC) {
+            cycleAncMode()
+            return START_STICKY
+        }
+
         // Only restart scanning if not currently connected
         if (!scanner.isScanning() && !_transport.isConnected) {
             scanner.startScan()
@@ -340,6 +354,23 @@ class AirPodsService : Service() {
             forceByCooldown = true
         )
     }
+
+    private fun cycleAncMode() {
+        val next = when (_ancMode.value) {
+            NoiseControlMode.OFF -> NoiseControlMode.NOISE_CANCELLATION
+            NoiseControlMode.NOISE_CANCELLATION -> NoiseControlMode.TRANSPARENCY
+            NoiseControlMode.TRANSPARENCY -> NoiseControlMode.ADAPTIVE
+            NoiseControlMode.ADAPTIVE -> NoiseControlMode.OFF
+            else -> NoiseControlMode.OFF
+        }
+        setNoiseControlMode(next)
+    }
+
+    /** Start BLE scan for Find My AirPods feature */
+    fun startFindMyScan() { scanner.startScan() }
+
+    /** Stop BLE scan for Find My AirPods (only if we should be stopped) */
+    fun stopFindMyScan() { if (_transport.isConnected) scanner.stopScan() }
 
     override fun onDestroy() {
         Log.d(TAG, "Service destroyed")
@@ -425,6 +456,7 @@ class AirPodsService : Service() {
         Log.d(TAG, "Connecting to: ${device.name} (${device.address})")
         _bondedDeviceName.value = device.name ?: "AirPods"
         connectedBtDevice = device
+        _leAudioCapability.value = me.arnabsaha.airpodscompanion.ble.LeAudioDetector.detect(device)
         updateNotificationImmediate("Connecting to ${device.name}...")
 
         // Save as last connected
@@ -621,6 +653,9 @@ class AirPodsService : Service() {
                         scanner.stopScan()
                         stopPruneLoop()
                         Log.d(TAG, "Stopped BLE scan + prune loop (connected)")
+                        me.arnabsaha.airpodscompanion.intents.IntentBroadcaster.broadcastConnected(
+                            this@AirPodsService, _bondedDeviceName.value ?: "AirPods"
+                        )
 
                         // Safety net: if no battery data arrives within 8 seconds of
                         // CONNECTED, re-send notification request to trigger data flow.
@@ -665,6 +700,8 @@ class AirPodsService : Service() {
                         hasConnectedOnce = false
                         _isBluetoothProfileConnected.value = false // Reset A2DP latch
                         resetInfoNotificationDismissed() // Allow notification to show again on next connection
+                        batteryAlertManager.resetAlerts()
+                        me.arnabsaha.airpodscompanion.intents.IntentBroadcaster.broadcastDisconnected(this@AirPodsService)
                     }
                     else -> {}
                 }
@@ -767,6 +804,10 @@ class AirPodsService : Service() {
 
         // Update popup if showing
         connectionPopup.updateContent(state, _ancMode.value, _earState.value)
+
+        // Battery alerts + automation broadcasts
+        batteryAlertManager.checkAndAlert(state)
+        me.arnabsaha.airpodscompanion.intents.IntentBroadcaster.broadcastBattery(this, state)
     }
 
     // ═══ Ear Detection Handler (opcode 0x06) ═══
@@ -796,6 +837,7 @@ class AirPodsService : Service() {
         Log.d(TAG, "Ear: L=${if (newState.leftInEar) "IN" else "OUT"} R=${if (newState.rightInEar) "IN" else "OUT"}")
         syncToWatch()
         connectionPopup.updateContent(_aacpBattery.value, _ancMode.value, newState)
+        me.arnabsaha.airpodscompanion.intents.IntentBroadcaster.broadcastEarState(this, newState)
 
         // Auto play/pause logic:
         // PAUSE: if ANY ear was in and is now removed (either one or both)
@@ -838,6 +880,7 @@ class AirPodsService : Service() {
                 Log.d(TAG, "ANC mode: $modeName")
                 syncToWatch()
                 connectionPopup.updateContent(_aacpBattery.value, value, _earState.value)
+                me.arnabsaha.airpodscompanion.intents.IntentBroadcaster.broadcastAncMode(this@AirPodsService, value)
             }
             ControlCommandId.CONVERSATION_AWARENESS -> {
                 val state = if (value == 0x01.toByte()) "ON" else "OFF"
@@ -1239,6 +1282,21 @@ class AirPodsService : Service() {
                 PendingIntent.FLAG_IMMUTABLE
             )
             builder.addAction(Notification.Action.Builder(null, "Quick View", popupIntent).build())
+
+            // ANC cycle action
+            val ancIntent = PendingIntent.getService(
+                this, 2,
+                Intent(this, AirPodsService::class.java).setAction(ACTION_CYCLE_ANC),
+                PendingIntent.FLAG_IMMUTABLE
+            )
+            val ancLabel = when (_ancMode.value) {
+                NoiseControlMode.OFF -> "ANC: Off"
+                NoiseControlMode.NOISE_CANCELLATION -> "ANC: On"
+                NoiseControlMode.TRANSPARENCY -> "ANC: Transp."
+                NoiseControlMode.ADAPTIVE -> "ANC: Adaptive"
+                else -> "ANC"
+            }
+            builder.addAction(Notification.Action.Builder(null, ancLabel, ancIntent).build())
         }
 
         return builder.build()

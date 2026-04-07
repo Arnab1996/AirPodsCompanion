@@ -102,6 +102,14 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     /** True when the AirPods have a system-level BT profile (A2DP) connected. */
     val isBluetoothProfileConnected: StateFlow<Boolean> = _isBluetoothProfileConnected.asStateFlow()
 
+    private val _leAudioCapability = MutableStateFlow<me.arnabsaha.airpodscompanion.ble.LeAudioCapability?>(null)
+    /** LE Audio capability detected on connect. */
+    val leAudioCapability: StateFlow<me.arnabsaha.airpodscompanion.ble.LeAudioCapability?> = _leAudioCapability.asStateFlow()
+
+    private val _nearestAirPods = MutableStateFlow<me.arnabsaha.airpodscompanion.ble.scanner.AirPodsAdvertisement?>(null)
+    /** Nearest AirPods by RSSI (for Find My feature). */
+    val nearestAirPods: StateFlow<me.arnabsaha.airpodscompanion.ble.scanner.AirPodsAdvertisement?> = _nearestAirPods.asStateFlow()
+
     // ── Persisted settings (exposed as StateFlows for the UI) ────
 
     private val prefs: SharedPreferences =
@@ -150,6 +158,10 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     private val _stemAction = MutableStateFlow(prefs.getString("stem_action", "Noise Control") ?: "Noise Control")
     /** Stem long-press action label. */
     val stemAction: StateFlow<String> = _stemAction.asStateFlow()
+
+    private val _batteryAlertThreshold = MutableStateFlow(prefs.getInt("battery_alert_threshold", 20))
+    /** Battery alert threshold percentage. */
+    val batteryAlertThreshold: StateFlow<Int> = _batteryAlertThreshold.asStateFlow()
 
     // ── Lifecycle ────────────────────────────────────────────────
 
@@ -303,6 +315,22 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
         _connectionError.value = null
     }
 
+    /** Set battery alert threshold percentage. */
+    fun setBatteryAlertThreshold(value: Int) {
+        _batteryAlertThreshold.value = value
+        prefs.edit().putInt("battery_alert_threshold", value).apply()
+    }
+
+    /** Start BLE scan for Find My AirPods. */
+    fun startFindMyScan() {
+        withService("startFindMyScan") { it.startFindMyScan() }
+    }
+
+    /** Stop BLE scan for Find My AirPods. */
+    fun stopFindMyScan() {
+        withService("stopFindMyScan") { it.stopFindMyScan() }
+    }
+
     // ── Internal ─────────────────────────────────────────────────
 
     /**
@@ -339,6 +367,12 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
         }
         viewModelScope.launch {
             service.isBluetoothProfileConnected.collect { _isBluetoothProfileConnected.value = it }
+        }
+        viewModelScope.launch {
+            service.leAudioCapability.collect { _leAudioCapability.value = it }
+        }
+        viewModelScope.launch {
+            service.nearestAirPods.collect { _nearestAirPods.value = it }
         }
     }
 

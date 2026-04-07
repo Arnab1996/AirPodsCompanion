@@ -41,6 +41,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Headphones
@@ -179,11 +180,20 @@ fun MainScreen(vm: AirPodsViewModel) {
 
 @Composable
 fun DashboardScreen(vm: AirPodsViewModel) {
+    var showFindMy by remember { mutableStateOf(false) }
+
+    if (showFindMy) {
+        me.arnabsaha.airpodscompanion.ui.screens.FindMyAirPodsScreen(vm, onBack = { showFindMy = false })
+        return
+    }
+
     val battery by vm.battery.collectAsState()
     val earState by vm.earState.collectAsState()
     val ancMode by vm.ancMode.collectAsState()
     val deviceName by vm.bondedDeviceName.collectAsState()
     val scrollState = rememberScrollState()
+    val leAudio by vm.leAudioCapability.collectAsState()
+    val batteryAlertThreshold by vm.batteryAlertThreshold.collectAsState()
 
     // Persisted settings from ViewModel
     val caEnabled by vm.caEnabled.collectAsState()
@@ -431,6 +441,60 @@ fun DashboardScreen(vm: AirPodsViewModel) {
             )
         ) {
             Text("Disconnect", style = MaterialTheme.typography.labelLarge)
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // ═══ Find My + LE Audio + Battery Alerts ═══
+        SectionCard {
+            // Find My AirPods
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showFindMy = true }
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Bluetooth, null, Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(12.dp))
+                    Text("Find My AirPods", style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface)
+                }
+                Icon(Icons.Default.ChevronRight, null, Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f))
+            }
+
+            Divider()
+
+            // LE Audio status
+            InfoRow("Audio Codec", leAudio?.displayText ?: "Checking...")
+
+            Divider()
+
+            // Battery Alert Threshold
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Battery Alert", style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface)
+                Text("${batteryAlertThreshold}%", style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+            }
+            androidx.compose.material3.Slider(
+                value = batteryAlertThreshold.toFloat(),
+                onValueChange = { vm.setBatteryAlertThreshold(it.toInt()) },
+                valueRange = 5f..50f,
+                steps = 8,
+                colors = androidx.compose.material3.SliderDefaults.colors(
+                    thumbColor = AppleGreen,
+                    activeTrackColor = AppleGreen
+                )
+            )
         }
 
         Spacer(Modifier.height(32.dp))

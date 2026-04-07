@@ -13,6 +13,9 @@ wearCompose = "1.4.1"
 wearTiles = "1.4.1"
 wearWatchface = "1.2.1"
 horologist = "0.6.20"
+glanceAppwidget = "1.1.1"
+wearOngoing = "1.0.0"
+carApp = "1.7.0-beta01"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -36,6 +39,9 @@ wear-tiles = { module = "androidx.wear.tiles:tiles", version.ref = "wearTiles" }
 wear-tiles-material = { module = "androidx.wear.tiles:tiles-material", version.ref = "wearTiles" }
 wear-watchface-complications-data-source-ktx = { module = "androidx.wear.watchface:watchface-complications-data-source-ktx", version.ref = "wearWatchface" }
 horologist-compose-tools = { module = "com.google.android.horologist:horologist-compose-tools", version.ref = "horologist" }
+glance-appwidget = { module = "androidx.glance:glance-appwidget", version.ref = "glanceAppwidget" }
+wear-ongoing = { module = "androidx.wear:wear-ongoing", version.ref = "wearOngoing" }
+car-app = { module = "androidx.car.app:app", version.ref = "carApp" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

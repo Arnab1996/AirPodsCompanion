@@ -60,4 +60,11 @@ dependencies {
 
     // Watch face complications
     implementation(libs.wear.watchface.complications.data.source.ktx)
+
+    // Tiles API
+    implementation(libs.wear.tiles)
+    implementation(libs.wear.tiles.material)
+
+    // Ongoing Activity
+    implementation(libs.wear.ongoing)
 }

@@ -100,6 +100,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Back press: close activity and remove from recents, service keeps running
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                finishAndRemoveTask()
+            }
+        })
+
         setContent {
             AirPodsCompanionTheme {
                 val viewModel: AirPodsViewModel = androidx.lifecycle.viewmodel.compose.viewModel(

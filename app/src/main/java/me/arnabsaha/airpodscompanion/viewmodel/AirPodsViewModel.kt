@@ -310,6 +310,7 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
      * Called once when the service is bound.
      */
     private fun startCollectingServiceFlows(service: AirPodsService) {
+        service.onAppOpened()
         viewModelScope.launch {
             service.aacpBattery.collect { _battery.value = it }
         }

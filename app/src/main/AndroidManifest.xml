@@ -81,6 +81,7 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="connectedDevice"
+            android:stopWithTask="false"
             android:permission="android.permission.BLUETOOTH_CONNECT" />
 
         <!-- Quick Settings Tile for ANC mode -->
@@ -103,6 +104,15 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Notification Dismiss Receiver -->
+        <receiver
+            android:name=".receivers.NotificationDismissReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="me.arnabsaha.airpodscompanion.INFO_NOTIFICATION_DISMISSED" />
             </intent-filter>
         </receiver>
 

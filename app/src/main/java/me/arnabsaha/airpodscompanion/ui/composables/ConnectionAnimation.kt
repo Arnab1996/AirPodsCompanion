@@ -195,19 +195,6 @@ fun ConnectionAnimation(
                 }
             }
         }
-
-        Spacer(Modifier.height(12.dp))
-        Text(
-            text = when {
-                isConnected -> "Connected"
-                isConnecting -> "Connecting..."
-                else -> ""
-            },
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = if (isConnected) AppleGreen
-                    else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
-        )
     }
 }
 

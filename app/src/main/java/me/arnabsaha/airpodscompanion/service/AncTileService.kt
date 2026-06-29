@@ -1,20 +1,26 @@
 package me.arnabsaha.airpodscompanion.service
 
-import android.annotation.SuppressLint
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
-import android.graphics.drawable.Icon
 import android.os.IBinder
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import me.arnabsaha.airpodscompanion.protocol.constants.NoiseControlMode
 
 /**
  * Quick Settings tile for cycling ANC modes.
  * Tap to cycle: Off → ANC → Transparency → Adaptive → Off
+ *
+ * The tile reflects the device's CONFIRMED ANC mode (echoed back over AACP), never an
+ * optimistic guess — so it can't lie if a command fails or the mode changes from elsewhere.
  */
 class AncTileService : TileService() {
 
@@ -24,16 +30,25 @@ class AncTileService : TileService() {
 
     private var airPodsService: AirPodsService? = null
     private var bound = false
+    private var collectScope: CoroutineScope? = null
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-            airPodsService = (service as AirPodsService.LocalBinder).getService()
+            val svc = (service as AirPodsService.LocalBinder).getService()
+            airPodsService = svc
             bound = true
-            updateTileState()
+            // Keep the tile in sync with the real ANC mode + connection, from any source
+            collectScope?.cancel()
+            collectScope = CoroutineScope(Dispatchers.Main).also { scope ->
+                scope.launch { svc.ancMode.collect { updateTileState() } }
+                scope.launch { svc.connectionState.collect { updateTileState() } }
+            }
         }
         override fun onServiceDisconnected(name: ComponentName?) {
             airPodsService = null
             bound = false
+            collectScope?.cancel()
+            collectScope = null
         }
     }
 
@@ -44,13 +59,14 @@ class AncTileService : TileService() {
 
     override fun onStopListening() {
         super.onStopListening()
+        collectScope?.cancel()
+        collectScope = null
         if (bound) {
             try { unbindService(connection) } catch (_: Exception) {}
             bound = false
         }
     }
 
-    @SuppressLint("StartActivityAndCollapseDeprecated")
     override fun onClick() {
         super.onClick()
         val service = airPodsService ?: return
@@ -64,15 +80,9 @@ class AncTileService : TileService() {
             else -> NoiseControlMode.OFF
         }
 
+        // Send the command; the tile repaints when the device echoes the new mode back
         service.setNoiseControlMode(nextMode)
-        Log.d(TAG, "ANC mode cycled to: ${modeName(nextMode)}")
-
-        // Update tile after a short delay for the state to propagate
-        qsTile?.let { tile ->
-            tile.label = modeName(nextMode)
-            tile.state = Tile.STATE_ACTIVE
-            tile.updateTile()
-        }
+        Log.d(TAG, "ANC mode cycle requested: ${modeName(nextMode)}")
     }
 
     private fun updateTileState() {

@@ -45,6 +45,9 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     private var airPodsService: AirPodsService? = null
     private var serviceBound = false
 
+    /** Suppresses the transient "connection lost" error when the user disconnects on purpose. */
+    private var suppressDisconnectError = false
+
     private val _serviceBound = MutableStateFlow(false)
     /** True once the service is bound and ready for commands. */
     val isServiceBound: StateFlow<Boolean> = _serviceBound.asStateFlow()
@@ -110,6 +113,14 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     /** Nearest AirPods by RSSI (for Find My feature). */
     val nearestAirPods: StateFlow<me.arnabsaha.airpodscompanion.ble.scanner.AirPodsAdvertisement?> = _nearestAirPods.asStateFlow()
 
+    private val _deviceInfo = MutableStateFlow<me.arnabsaha.airpodscompanion.service.DeviceInfo?>(null)
+    /** Real device info (model / serial / firmware) parsed from AACP opcode 0x1D. */
+    val deviceInfo: StateFlow<me.arnabsaha.airpodscompanion.service.DeviceInfo?> = _deviceInfo.asStateFlow()
+
+    private val _headGesture = MutableStateFlow<Pair<Long, String>?>(null)
+    /** Latest detected head gesture: (sequence, "nod"|"shake"). Sequence bumps each time. */
+    val headGesture: StateFlow<Pair<Long, String>?> = _headGesture.asStateFlow()
+
     // ── Persisted settings (exposed as StateFlows for the UI) ────
 
     private val prefs: SharedPreferences =
@@ -142,6 +153,10 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     private val _inCaseTone = MutableStateFlow(prefs.getBoolean("in_case_tone", true))
     /** In-Case Tone toggle state. */
     val inCaseTone: StateFlow<Boolean> = _inCaseTone.asStateFlow()
+
+    private val _allowOff = MutableStateFlow(prefs.getBoolean("allow_off", true))
+    /** Off Listening Mode toggle state (ALLOW_OFF_OPTION). */
+    val allowOff: StateFlow<Boolean> = _allowOff.asStateFlow()
 
     private val _headTracking = MutableStateFlow(prefs.getBoolean("head_tracking", false))
     /** Head Tracking / Spatial Audio toggle state. */
@@ -235,6 +250,11 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
         _chimeVolume.value = volume
     }
 
+    /** Play a short chime at the current chime volume so the user can hear the level. */
+    fun previewChime() {
+        withService("previewChime") { it.playChimePreview() }
+    }
+
     /** Rename the AirPods. Sends the rename packet and updates the bonded device name. */
     fun renameAirPods(newName: String) {
         withService("renameAirPods") { it.renameAirPods(newName) }
@@ -253,12 +273,20 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
 
     /** Connect to a specific bonded AirPods device. */
     fun connectToDevice(device: BluetoothDevice) {
+        suppressDisconnectError = false
         withService("connectToDevice") { it.connectToSpecificDevice(device) }
     }
 
     /** Auto-connect to the most recently used or first available bonded AirPods. */
     fun autoConnect() {
-        withService("autoConnect") { it.autoConnect() }
+        suppressDisconnectError = false
+        withService("autoConnect") { it.autoConnect(userInitiated = true) }
+    }
+
+    /** User-initiated disconnect. Suppresses the transient "connection lost" error. */
+    fun disconnect() {
+        suppressDisconnectError = true
+        withService("disconnect") { it.disconnectManually() }
     }
 
     /** Toggle one-bud ANC. */
@@ -294,6 +322,15 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
         saveBool("in_case_tone", enabled)
         withService("setInCaseTone") {
             it.transport.sendControlCommand(0x31, if (enabled) 0x01 else 0x02)
+        }
+    }
+
+    /** Toggle Off Listening Mode (ALLOW_OFF_OPTION 0x34). */
+    fun setAllowOff(enabled: Boolean) {
+        _allowOff.value = enabled
+        saveBool("allow_off", enabled)
+        withService("setAllowOff") {
+            it.transport.sendControlCommand(0x34, if (enabled) 0x01 else 0x02)
         }
     }
 
@@ -354,9 +391,10 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
         viewModelScope.launch {
             service.connectionState.collect { state ->
                 _connectionState.value = state
-                // Surface reconnection failures as transient errors
+                if (state == AacpTransport.ConnectionState.CONNECTED) suppressDisconnectError = false
+                // Surface reconnection failures as transient errors (but not on a manual disconnect)
                 if (state == AacpTransport.ConnectionState.DISCONNECTED &&
-                    _battery.value != null) {
+                    _battery.value != null && !suppressDisconnectError) {
                     // Was previously connected and lost connection
                     _connectionError.value = "Connection to AirPods lost"
                 }
@@ -373,6 +411,12 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
         }
         viewModelScope.launch {
             service.nearestAirPods.collect { _nearestAirPods.value = it }
+        }
+        viewModelScope.launch {
+            service.deviceInfo.collect { _deviceInfo.value = it }
+        }
+        viewModelScope.launch {
+            service.headGesture.collect { _headGesture.value = it }
         }
     }
 
@@ -403,6 +447,9 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
                         kotlinx.coroutines.delay(200)
                         if (service.connectionState.value != AacpTransport.ConnectionState.CONNECTED) return@launch
                         service.setChimeVolume(_chimeVolume.value.toInt())
+                        kotlinx.coroutines.delay(200)
+                        if (service.connectionState.value != AacpTransport.ConnectionState.CONNECTED) return@launch
+                        service.transport.sendControlCommand(0x34, if (_allowOff.value) 0x01 else 0x02)
                         Log.d(TAG, "Saved settings applied (staggered)")
 
                         // Head tracking: delayed start after 30s to let the L2CAP

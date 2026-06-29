@@ -145,17 +145,21 @@ class ConnectionPopup(private val context: Context) {
         handler.post {
             val view = popupView ?: return@post
             if (!isShowing) return@post
+            isShowing = false  // stop live updates and guard against a double dismiss
 
+            // Glide fully off the top from wherever the view currently is (it may be part-way
+            // up from a swipe), easing out so it doesn't snap.
+            val target = -(view.height.toFloat() + dp(48))
             view.animate()
-                .translationY(-300f)
+                .translationY(target)
                 .alpha(0f)
-                .setDuration(300)
-                .setInterpolator(AccelerateInterpolator())
+                .setDuration(280)
+                .setInterpolator(DecelerateInterpolator(2f))
                 .withEndAction { forceRemoveView() }
                 .start()
 
-            // Safety net — force remove after animation timeout
-            handler.postDelayed({ forceRemoveView() }, 500)
+            // Safety net in case the animation is interrupted
+            handler.postDelayed({ forceRemoveView() }, 600)
         }
     }
 
@@ -344,13 +348,15 @@ class ConnectionPopup(private val context: Context) {
         statusRow.addView(earRow)
         container.addView(statusRow)
 
-        // Wrap in FrameLayout with top padding
+        // Wrap in FrameLayout with top padding; cap the island width + center it
         val wrapper = FrameLayout(context).apply {
             val margin = dp(16)
             setPadding(margin, dp(48), margin, 0)
+            val maxWidth = minOf(dp(380), context.resources.displayMetrics.widthPixels - dp(40))
             addView(container, FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT
+                maxWidth,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER_HORIZONTAL
             ))
         }
 
@@ -388,9 +394,8 @@ class ConnectionPopup(private val context: Context) {
                         val threshold = SWIPE_THRESHOLD_DP * v.resources.displayMetrics.density
                         if (deltaY < -threshold || velocity < -SWIPE_VELOCITY_THRESHOLD) {
                             dismiss()
-                        } else if (kotlin.math.abs(deltaY) < 10) {
-                            dismiss()
                         } else {
+                            // Snap back — only a deliberate swipe-up dismisses (no accidental tap-to-close)
                             popupView?.animate()?.translationY(0f)?.setDuration(200)?.start()
                         }
                         return true

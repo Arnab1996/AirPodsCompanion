@@ -73,6 +73,10 @@ dependencies {
     // Android Auto
     implementation(libs.car.app)
 
+    // Liquid-glass backdrop blur
+    implementation(libs.haze)
+    implementation(libs.haze.materials)
+
     // Testing
     testImplementation("junit:junit:4.13.2")
 }

@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.widget.RemoteViews
+import androidx.glance.appwidget.updateAll
 import kotlinx.coroutines.launch
 import me.arnabsaha.airpodscompanion.R
 

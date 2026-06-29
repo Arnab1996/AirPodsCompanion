@@ -1,19 +1,29 @@
 package me.arnabsaha.airpodscompanion
 
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -59,8 +69,10 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -72,9 +84,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -92,15 +108,22 @@ import me.arnabsaha.airpodscompanion.ui.theme.AirPodsCompanionTheme
 import me.arnabsaha.airpodscompanion.ui.theme.AppleGreen
 import me.arnabsaha.airpodscompanion.ui.theme.AppleOrange
 import me.arnabsaha.airpodscompanion.ui.theme.AppleRed
+import me.arnabsaha.airpodscompanion.ui.theme.GlassBackdrop
+import me.arnabsaha.airpodscompanion.ui.theme.LocalHazeState
+import me.arnabsaha.airpodscompanion.ui.theme.Radius
+import me.arnabsaha.airpodscompanion.ui.theme.glassBorder
+import me.arnabsaha.airpodscompanion.ui.theme.glassEffect
+import me.arnabsaha.airpodscompanion.ui.theme.glassStyle
+import me.arnabsaha.airpodscompanion.ui.theme.rememberGlassState
 import me.arnabsaha.airpodscompanion.viewmodel.AirPodsViewModel
 import me.arnabsaha.airpodscompanion.viewmodel.AirPodsViewModelFactory
+import kotlin.math.roundToInt
 
 private const val TAG = "MainActivity"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
 
         // Back press: close activity and remove from recents, service keeps running
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
@@ -149,25 +172,63 @@ fun MainScreen(vm: AirPodsViewModel) {
 
         val connState by vm.connectionState.collectAsState()
         val btProfileConnected by vm.isBluetoothProfileConnected.collectAsState()
+        val gateEarState by vm.earState.collectAsState()
+        val bothInCase = gateEarState.leftInCase && gateEarState.rightInCase
 
-        // Minimum animation display time — show connecting for at least 2.5s
+        // Show the dashboard only while the AirPods are actually in use. Stay through brief AACP
+        // reconnects, but revert to the picker quickly once they're stowed (both in case), the
+        // audio profile drops, or the link fails — no long "Reconnecting…" limbo.
         var showDashboard by remember { mutableStateOf(false) }
-        LaunchedEffect(connState, btProfileConnected) {
-            if (connState == AacpTransport.ConnectionState.CONNECTED && btProfileConnected) {
-                if (!showDashboard) {
-                    kotlinx.coroutines.delay(1500) // Brief animation, then show dashboard
-                    showDashboard = true
+        LaunchedEffect(connState, btProfileConnected, bothInCase) {
+            when {
+                // Both buds back in the case → user is done; return to origin promptly.
+                bothInCase -> {
+                    kotlinx.coroutines.delay(600)
+                    showDashboard = false
                 }
-            } else {
-                showDashboard = false
+                connState == AacpTransport.ConnectionState.CONNECTED && btProfileConnected -> {
+                    if (!showDashboard) {
+                        kotlinx.coroutines.delay(400)
+                        showDashboard = true
+                    }
+                }
+                connState == AacpTransport.ConnectionState.FAILED -> showDashboard = false
+                // Audio profile gone (latch already expired) → real disconnect.
+                !btProfileConnected -> {
+                    kotlinx.coroutines.delay(800)
+                    showDashboard = false
+                }
+                connState == AacpTransport.ConnectionState.DISCONNECTED -> {
+                    kotlinx.coroutines.delay(1200)
+                    showDashboard = false
+                }
+                // CONNECTING / HANDSHAKING / RECONNECTING with audio still latched: hold.
             }
         }
 
-        when {
-            showDashboard && connState == AacpTransport.ConnectionState.CONNECTED && btProfileConnected -> DashboardScreen(vm)
-            connState == AacpTransport.ConnectionState.DISCONNECTED ||
-            connState == AacpTransport.ConnectionState.FAILED -> DevicePickerScreen(vm)
-            else -> ConnectingScreen(vm, connState, btProfileConnected)
+        val btEnabled = rememberBluetoothEnabled()
+        val screen = when {
+            !btEnabled -> "bt_off"
+            showDashboard -> "dashboard"
+            // Active first-time connect → connecting animation. Anything else (disconnected,
+            // failed, or reconnecting to an unreachable device) → the picker, so the user gets
+            // an actionable screen instead of staring at "Reconnecting…".
+            connState == AacpTransport.ConnectionState.CONNECTING ||
+            connState == AacpTransport.ConnectionState.HANDSHAKING ||
+            connState == AacpTransport.ConnectionState.CONNECTED -> "connecting"
+            else -> "picker"
+        }
+        AnimatedContent(
+            targetState = screen,
+            transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) },
+            label = "screen"
+        ) { target ->
+            when (target) {
+                "bt_off" -> BluetoothOffScreen()
+                "dashboard" -> DashboardScreen(vm)
+                "picker" -> DevicePickerScreen(vm)
+                else -> ConnectingScreen(vm, connState, btProfileConnected)
+            }
         }
     } else {
         PermissionsScreen(perms, Settings.canDrawOverlays(context))
@@ -183,6 +244,7 @@ fun DashboardScreen(vm: AirPodsViewModel) {
     var showFindMy by remember { mutableStateOf(false) }
 
     if (showFindMy) {
+        androidx.activity.compose.BackHandler { showFindMy = false }
         me.arnabsaha.airpodscompanion.ui.screens.FindMyAirPodsScreen(vm, onBack = { showFindMy = false })
         return
     }
@@ -191,6 +253,7 @@ fun DashboardScreen(vm: AirPodsViewModel) {
     val earState by vm.earState.collectAsState()
     val ancMode by vm.ancMode.collectAsState()
     val deviceName by vm.bondedDeviceName.collectAsState()
+    val connState by vm.connectionState.collectAsState()
     val scrollState = rememberScrollState()
     val leAudio by vm.leAudioCapability.collectAsState()
     val batteryAlertThreshold by vm.batteryAlertThreshold.collectAsState()
@@ -207,16 +270,22 @@ fun DashboardScreen(vm: AirPodsViewModel) {
     val headTrackingLoading by vm.headTrackingLoading.collectAsState()
     val chimeVolume by vm.chimeVolume.collectAsState()
     val stemAction by vm.stemAction.collectAsState()
+    val allowOff by vm.allowOff.collectAsState()
+    val deviceInfo by vm.deviceInfo.collectAsState()
+    val autoResume by vm.autoResume.collectAsState()
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .windowInsetsPadding(WindowInsets.statusBars)
-            .verticalScroll(scrollState)
-            .padding(horizontal = 20.dp)
-    ) {
-        Spacer(Modifier.height(16.dp))
+    val hazeState = rememberGlassState()
+    Box(modifier = Modifier.fillMaxSize()) {
+      GlassBackdrop(hazeState)
+      CompositionLocalProvider(LocalHazeState provides hazeState) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .verticalScroll(scrollState)
+                .padding(horizontal = 20.dp)
+        ) {
+            Spacer(Modifier.height(16.dp))
 
         // Header with connection badge
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -227,9 +296,15 @@ fun DashboardScreen(vm: AirPodsViewModel) {
                     color = MaterialTheme.colorScheme.onBackground
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(8.dp).clip(CircleShape).background(AppleGreen))
+                    val isLive = connState == AacpTransport.ConnectionState.CONNECTED
+                    val statusColor = if (isLive) AppleGreen else AppleOrange
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(statusColor))
                     Spacer(Modifier.width(6.dp))
-                    Text("Connected", style = MaterialTheme.typography.bodySmall, color = AppleGreen)
+                    Text(
+                        if (isLive) "Connected" else "Reconnecting…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = statusColor
+                    )
                 }
             }
             // Ear indicators in header
@@ -250,20 +325,28 @@ fun DashboardScreen(vm: AirPodsViewModel) {
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                BatteryGauge("Left", battery?.leftLevel ?: -1, battery?.leftCharging == true)
-                BatteryGauge("Right", battery?.rightLevel ?: -1, battery?.rightCharging == true)
-                BatteryGauge("Case", battery?.caseLevel ?: -1, battery?.caseCharging == true)
+                BatteryGauge("Left", battery?.leftLevel ?: -1, battery?.leftCharging == true, isLoading = battery == null)
+                BatteryGauge("Right", battery?.rightLevel ?: -1, battery?.rightCharging == true, isLoading = battery == null)
+                BatteryGauge("Case", battery?.caseLevel ?: -1, battery?.caseCharging == true, isLoading = battery == null)
             }
         }
 
         Spacer(Modifier.height(20.dp))
 
         // Noise Control — segmented with icons
-        Text("Noise Control", style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
-            modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
+        SectionHeader("Noise Control")
 
         AncSegmentedControl(currentMode = ancMode, onModeChange = { vm.setNoiseControlMode(it) })
+
+        Spacer(Modifier.height(20.dp))
+
+        // ═══ Find My + Codec + Battery Alerts (key utilities, kept near the top) ═══
+        StatusUtilityCard(
+            leAudioText = leAudio?.displayText ?: "Checking…",
+            batteryAlertThreshold = batteryAlertThreshold,
+            onFindMy = { showFindMy = true },
+            onThresholdChange = { vm.setBatteryAlertThreshold(it) }
+        )
 
         Spacer(Modifier.height(20.dp))
 
@@ -280,25 +363,31 @@ fun DashboardScreen(vm: AirPodsViewModel) {
             // Chime Volume with labeled slider
             var localChimeVolume by remember { mutableStateOf(chimeVolume) }
             LaunchedEffect(chimeVolume) { localChimeVolume = chimeVolume }
+            val chimeHaptic = LocalHapticFeedback.current
             Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
-                Text("Chime Volume", style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface)
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Quiet", style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
-                    androidx.compose.material3.Slider(
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Chime Volume", style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface)
+                    Text("${localChimeVolume.roundToInt()}%", style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                }
+                Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.AutoMirrored.Filled.VolumeOff, null, Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+                    AppleSlider(
                         value = localChimeVolume,
                         onValueChange = { localChimeVolume = it },
-                        onValueChangeFinished = { vm.setChimeVolume(localChimeVolume) },
+                        onValueChangeFinished = {
+                            chimeHaptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            vm.setChimeVolume(localChimeVolume)
+                            vm.previewChime()
+                        },
                         valueRange = 0f..100f,
-                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-                        colors = androidx.compose.material3.SliderDefaults.colors(
-                            thumbColor = MaterialTheme.colorScheme.primary,
-                            activeTrackColor = MaterialTheme.colorScheme.primary
-                        )
+                        accent = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f).padding(horizontal = 12.dp)
                     )
-                    Text("Loud", style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+                    Icon(Icons.AutoMirrored.Filled.VolumeUp, null, Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
                 }
             }
             Divider()
@@ -313,6 +402,9 @@ fun DashboardScreen(vm: AirPodsViewModel) {
             Divider()
             SettingToggle("Volume Swipe", "Swipe the stem to adjust volume",
                 enabled = volumeSwipe, onToggle = { vm.setVolumeSwipe(it) })
+            Divider()
+            SettingToggle("Resume Music on Connect", "Start playback automatically when your AirPods connect",
+                enabled = autoResume, onToggle = { vm.setAutoResume(it) })
         }
 
         Spacer(Modifier.height(20.dp))
@@ -322,7 +414,7 @@ fun DashboardScreen(vm: AirPodsViewModel) {
         SectionCard {
             SettingToggle("Head Gestures",
                 if (headTrackingLoading) "Starting in a moment…"
-                else "Move your head up and down or side to side to respond to calls",
+                else "Move your head to answer or decline calls. Keep both AirPods in your ears.",
                 enabled = headTrackingOn, onToggle = { vm.toggleHeadTracking() })
             if (headTrackingLoading) {
                 Row(
@@ -340,6 +432,31 @@ fun DashboardScreen(vm: AirPodsViewModel) {
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
                 }
             }
+            // Live status once warm-up completes — and a flash when a gesture fires
+            val headGesture by vm.headGesture.collectAsState()
+            var gestureFlash by remember { mutableStateOf<String?>(null) }
+            LaunchedEffect(headGesture) {
+                when (headGesture?.second) {
+                    "nod" -> { gestureFlash = "Nodded — Yes ✓"; kotlinx.coroutines.delay(2500); gestureFlash = null }
+                    "shake" -> { gestureFlash = "Shook — No ✗"; kotlinx.coroutines.delay(2500); gestureFlash = null }
+                }
+            }
+            if (headTrackingOn && !headTrackingLoading) {
+                val flashing = gestureFlash != null
+                val statusColor = if (flashing) MaterialTheme.colorScheme.primary else AppleGreen
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(statusColor))
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        gestureFlash ?: "Listening — nod to accept, shake to decline",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = statusColor
+                    )
+                }
+            }
             Divider()
             SettingInfo("Accept, Reply", "Up and Down")
             Divider()
@@ -355,29 +472,34 @@ fun DashboardScreen(vm: AirPodsViewModel) {
             Divider()
             SettingToggle("Off Listening Mode",
                 "When on, listening modes will include an Off option. Loud sounds are not reduced in Off mode.",
-                enabled = true, onToggle = { /* Control command 0x34: allow off option */ })
+                enabled = allowOff, onToggle = { vm.setAllowOff(it) })
             Divider()
             // Press and Hold configuration
+            var showStemDialog by remember { mutableStateOf(false) }
             Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp),
+                modifier = Modifier.fillMaxWidth()
+                    .clickable { showStemDialog = true }
+                    .padding(vertical = 14.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("Press and Hold", style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface)
-                Text(stemAction, style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(stemAction, style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                    Spacer(Modifier.width(4.dp))
+                    Icon(Icons.Default.ChevronRight, null, Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f))
+                }
             }
-        }
-
-        Spacer(Modifier.height(20.dp))
-
-        // ═══ Spatial Audio Section ═══
-        SectionHeader("Spatial Audio")
-        SectionCard {
-            SettingToggle("Personalized Spatial Audio",
-                "Improves rendering of Spatial Audio when using supported AirPods with your device",
-                enabled = headTrackingOn, onToggle = { vm.toggleHeadTracking() })
+            if (showStemDialog) {
+                StemActionDialog(
+                    current = stemAction,
+                    onDismiss = { showStemDialog = false },
+                    onSelect = { vm.setStemAction(it); showStemDialog = false }
+                )
+            }
         }
 
         Spacer(Modifier.height(20.dp))
@@ -386,13 +508,13 @@ fun DashboardScreen(vm: AirPodsViewModel) {
         SectionCard {
             var showRenameDialog by remember { mutableStateOf(false) }
             Row(
-                modifier = Modifier.fillMaxWidth().clickable { showRenameDialog = true }.padding(vertical = 14.dp),
+                modifier = Modifier.fillMaxWidth().clickable { showRenameDialog = true }.padding(vertical = 10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Name", style = MaterialTheme.typography.bodyLarge,
+                Text("Name", style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface)
-                Text(deviceName ?: "AirPods Pro", style = MaterialTheme.typography.bodyMedium,
+                Text(deviceName ?: "AirPods Pro", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
             }
             if (showRenameDialog) {
@@ -401,11 +523,15 @@ fun DashboardScreen(vm: AirPodsViewModel) {
                     onRename = { vm.renameAirPods(it); showRenameDialog = false })
             }
             Divider()
-            SettingInfo("Model", deviceName ?: "AirPods Pro")
+            SettingInfo("Model", deviceInfo?.modelNumber?.ifBlank { null } ?: "—", dense = true)
             Divider()
-            SettingInfo("Protocol", "AACP / L2CAP")
+            SettingInfo("Firmware", deviceInfo?.firmwareVersion?.ifBlank { null } ?: "—", dense = true)
             Divider()
-            SettingInfo("Version", "0.1.0")
+            SettingInfo("Serial", deviceInfo?.serialNumber?.ifBlank { null } ?: "—", dense = true)
+            Divider()
+            SettingInfo("Protocol", "AACP / L2CAP", dense = true)
+            Divider()
+            SettingInfo("App Version", "0.1.0", dense = true)
             Divider()
             // Overlay permission
             val context = LocalContext.current
@@ -417,92 +543,198 @@ fun DashboardScreen(vm: AirPodsViewModel) {
                             android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                             "package:${context.packageName}".toUri()))
                     }
-                    .padding(vertical = 14.dp),
+                    .padding(vertical = 10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Popup Overlay", style = MaterialTheme.typography.bodyLarge,
+                Text("Popup Overlay", style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface)
                 Text(if (hasOverlay) "Granted" else "Tap to enable",
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
                     color = if (hasOverlay) AppleGreen else MaterialTheme.colorScheme.primary)
             }
         }
 
         Spacer(Modifier.height(24.dp))
 
-        // ═══ Disconnect Button ═══
+        // ═══ Disconnect + Forget ═══
+        var showDisconnectDialog by remember { mutableStateOf(false) }
         androidx.compose.material3.OutlinedButton(
-            onClick = { /* TODO: implement disconnect */ },
+            onClick = { showDisconnectDialog = true },
             modifier = Modifier.fillMaxWidth().height(48.dp),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(Radius.control),
             colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
                 contentColor = AppleRed
             )
         ) {
             Text("Disconnect", style = MaterialTheme.typography.labelLarge)
         }
+        if (showDisconnectDialog) {
+            DisconnectConfirmDialog(
+                deviceName = deviceName ?: "AirPods",
+                onDismiss = { showDisconnectDialog = false },
+                onConfirm = { vm.disconnect(); showDisconnectDialog = false }
+            )
+        }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(8.dp))
 
-        // ═══ Find My + LE Audio + Battery Alerts ═══
-        SectionCard {
-            // Find My AirPods
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { showFindMy = true }
-                    .padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Bluetooth, null, Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(12.dp))
-                    Text("Find My AirPods", style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface)
-                }
-                Icon(Icons.Default.ChevronRight, null, Modifier.size(20.dp),
-                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f))
-            }
-
-            Divider()
-
-            // LE Audio status
-            InfoRow("Audio Codec", leAudio?.displayText ?: "Checking...")
-
-            Divider()
-
-            // Battery Alert Threshold
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Battery Alert", style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface)
-                Text("${batteryAlertThreshold}%", style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
-            }
-            androidx.compose.material3.Slider(
-                value = batteryAlertThreshold.toFloat(),
-                onValueChange = { vm.setBatteryAlertThreshold(it.toInt()) },
-                valueRange = 5f..50f,
-                steps = 8,
-                colors = androidx.compose.material3.SliderDefaults.colors(
-                    thumbColor = AppleGreen,
-                    activeTrackColor = AppleGreen
-                )
+        var showForgetDialog by remember { mutableStateOf(false) }
+        androidx.compose.material3.TextButton(
+            onClick = { showForgetDialog = true },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Forget This Device", style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+        }
+        if (showForgetDialog) {
+            ForgetConfirmDialog(
+                deviceName = deviceName ?: "AirPods",
+                onDismiss = { showForgetDialog = false },
+                onConfirm = { vm.forgetDevice(); showForgetDialog = false }
             )
         }
 
         Spacer(Modifier.height(32.dp))
+      }
+      }
     }
 }
 
 @Composable
-fun BatteryGauge(label: String, level: Int, isCharging: Boolean) {
+private fun StatusUtilityCard(
+    leAudioText: String,
+    batteryAlertThreshold: Int,
+    onFindMy: () -> Unit,
+    onThresholdChange: (Int) -> Unit
+) {
+    SectionCard {
+        // Find My AirPods
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onFindMy() }
+                .padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Bluetooth, null, Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(12.dp))
+                Text("Find My AirPods", style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface)
+            }
+            Icon(Icons.Default.ChevronRight, null, Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f))
+        }
+        Divider()
+        // LE Audio status
+        InfoRow("Audio Codec", leAudioText)
+        Divider()
+        // Battery Alert Threshold
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Battery Alert", style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface)
+            Text("$batteryAlertThreshold%", style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+        }
+        AppleSlider(
+            value = batteryAlertThreshold.toFloat(),
+            onValueChange = { onThresholdChange(((it / 5).roundToInt() * 5).coerceIn(5, 50)) },
+            valueRange = 5f..50f,
+            accent = AppleGreen,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+fun StemActionDialog(current: String, onDismiss: () -> Unit, onSelect: (String) -> Unit) {
+    val options = listOf("Noise Control", "Voice Assistant")
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Press and Hold", style = MaterialTheme.typography.titleMedium) },
+        text = {
+            Column {
+                options.forEach { option ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .clickable { onSelect(option) }
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = current == option, onClick = { onSelect(option) })
+                        Spacer(Modifier.width(6.dp))
+                        Text(option, style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                Text("Done", color = MaterialTheme.colorScheme.primary)
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surface
+    )
+}
+
+@Composable
+fun DisconnectConfirmDialog(deviceName: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Disconnect?", style = MaterialTheme.typography.titleLarge) },
+        text = {
+            Text(
+                "AirBridge will stop managing $deviceName until you reconnect. Audio playback is unaffected.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+            )
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = onConfirm) {
+                Text("Disconnect", color = AppleRed)
+            }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+        containerColor = MaterialTheme.colorScheme.surface
+    )
+}
+
+@Composable
+fun ForgetConfirmDialog(deviceName: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Forget $deviceName?", style = MaterialTheme.typography.titleMedium) },
+        text = {
+            Text(
+                "This unpairs $deviceName from your phone. You'll need to re-pair them in Bluetooth settings to use them again.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+            )
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = onConfirm) {
+                Text("Forget", color = AppleRed)
+            }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+        containerColor = MaterialTheme.colorScheme.surface
+    )
+}
+
+@Composable
+fun BatteryGauge(label: String, level: Int, isCharging: Boolean, isLoading: Boolean = false) {
     val displayLevel = if (level < 0) -1 else level
     val color = when {
         displayLevel < 0 -> Color.Gray.copy(alpha = 0.3f)
@@ -524,12 +756,27 @@ fun BatteryGauge(label: String, level: Int, isCharging: Boolean) {
         }
     ) {
         Box(contentAlignment = Alignment.Center, modifier = Modifier.size(80.dp)) {
-            androidx.compose.foundation.Canvas(modifier = Modifier.size(68.dp)) {
-                drawArc(Color.Gray.copy(alpha = 0.1f), -90f, 360f, false,
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(10f))
+            androidx.compose.foundation.Canvas(modifier = Modifier.size(72.dp)) {
+                val stroke = 9f
+                val ringRadius = size.minDimension / 2f - stroke
+                // Recessed "well" — soft radial gradient gives the gauge an inset, neumorphic feel
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        listOf(Color.White.copy(alpha = 0.06f), Color.Black.copy(alpha = 0.22f)),
+                        center = center, radius = size.minDimension / 2f
+                    ),
+                    radius = ringRadius
+                )
+                // Track
+                drawArc(Color.White.copy(alpha = 0.08f), -90f, 360f, false,
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(stroke))
                 if (displayLevel >= 0) {
+                    // Soft glow under the progress arc — fakes a raised, lit ring
+                    drawArc(color.copy(alpha = 0.30f), -90f, 360f * animatedLevel, false,
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(stroke * 2.4f,
+                            cap = androidx.compose.ui.graphics.StrokeCap.Round))
                     drawArc(color, -90f, 360f * animatedLevel, false,
-                        style = androidx.compose.ui.graphics.drawscope.Stroke(10f,
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(stroke,
                             cap = androidx.compose.ui.graphics.StrokeCap.Round))
                 }
             }
@@ -542,7 +789,7 @@ fun BatteryGauge(label: String, level: Int, isCharging: Boolean) {
                 )
             } else {
                 Text(
-                    text = if (label == "Case") "Closed" else "—",
+                    text = if (isLoading) "Updating" else if (label == "Case") "Closed" else "—",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
                 )
@@ -587,40 +834,50 @@ fun AncSegmentedControl(currentMode: Byte, onModeChange: (Byte) -> Unit) {
         AncOption("Adaptive", NoiseControlMode.ADAPTIVE, Icons.Default.GraphicEq)
     )
 
+    val haptic = LocalHapticFeedback.current
+    val primary = MaterialTheme.colorScheme.primary
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+            .padding(5.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
     ) {
         modes.forEach { opt ->
             val isSelected = currentMode == opt.mode
-            Box(
-                modifier = Modifier
+            val contentColor by animateColorAsState(
+                if (isSelected) Color.White
+                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                tween(220), label = "ancFg"
+            )
+            val pillShape = RoundedCornerShape(12.dp)
+            // Selected segment is a raised glass pill; the rest sit flat in the inset track
+            val segmentModifier = if (isSelected) {
+                Modifier
                     .weight(1f)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(
-                        if (isSelected) MaterialTheme.colorScheme.primary
-                        else Color.Transparent
-                    )
-                    .clickable { onModeChange(opt.mode) }
+                    .shadow(6.dp, pillShape)
+                    .clip(pillShape)
+                    .background(Brush.verticalGradient(listOf(primary, primary.copy(alpha = 0.82f))))
+            } else {
+                Modifier.weight(1f).clip(pillShape)
+            }
+            Box(
+                modifier = segmentModifier
+                    .clickable {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onModeChange(opt.mode)
+                    }
                     .padding(vertical = 12.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        opt.icon, opt.label, Modifier.size(20.dp),
-                        tint = if (isSelected) Color.White
-                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                    )
+                    Icon(opt.icon, opt.label, Modifier.size(20.dp), tint = contentColor)
                     Spacer(Modifier.height(4.dp))
                     Text(
                         text = opt.label,
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (isSelected) Color.White
-                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                        color = contentColor,
                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                         maxLines = 1
                     )
@@ -679,6 +936,45 @@ fun Divider() {
     )
 }
 
+/**
+ * Clean, Apple-style slider: a thin track in [accent] with a round white thumb and a
+ * soft shadow. No tick marks or stop indicators — those are what made the stock
+ * Material 3 slider look cluttered.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun AppleSlider(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    accent: Color,
+    modifier: Modifier = Modifier,
+    onValueChangeFinished: (() -> Unit)? = null
+) {
+    androidx.compose.material3.Slider(
+        value = value,
+        onValueChange = onValueChange,
+        onValueChangeFinished = onValueChangeFinished,
+        valueRange = valueRange,
+        modifier = modifier,
+        colors = androidx.compose.material3.SliderDefaults.colors(
+            thumbColor = Color.White,
+            activeTrackColor = accent,
+            inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+            activeTickColor = Color.Transparent,
+            inactiveTickColor = Color.Transparent
+        ),
+        thumb = {
+            Box(
+                Modifier
+                    .size(22.dp)
+                    .shadow(3.dp, CircleShape, clip = false)
+                    .background(Color.White, CircleShape)
+            )
+        }
+    )
+}
+
 @Composable
 fun RenameDialog(currentName: String, onDismiss: () -> Unit, onRename: (String) -> Unit) {
     var name by remember { mutableStateOf(currentName) }
@@ -718,10 +1014,15 @@ fun SectionHeader(title: String) {
 
 @Composable
 fun SettingToggle(title: String, description: String, enabled: Boolean, onToggle: (Boolean) -> Unit) {
+    val haptic = LocalHapticFeedback.current
+    val toggle: (Boolean) -> Unit = {
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        onToggle(it)
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onToggle(!enabled) }
+            .clickable { toggle(!enabled) }
             .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -735,7 +1036,7 @@ fun SettingToggle(title: String, description: String, enabled: Boolean, onToggle
         Spacer(Modifier.width(12.dp))
         androidx.compose.material3.Switch(
             checked = enabled,
-            onCheckedChange = onToggle,
+            onCheckedChange = toggle,
             colors = androidx.compose.material3.SwitchDefaults.colors(
                 checkedTrackColor = AppleGreen,
                 checkedThumbColor = Color.White
@@ -745,15 +1046,17 @@ fun SettingToggle(title: String, description: String, enabled: Boolean, onToggle
 }
 
 @Composable
-fun SettingInfo(label: String, value: String) {
+fun SettingInfo(label: String, value: String, dense: Boolean = false) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = if (dense) 7.dp else 14.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label, style = MaterialTheme.typography.bodyLarge,
+        Text(label,
+            style = if (dense) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurface)
-        Text(value, style = MaterialTheme.typography.bodyMedium,
+        Text(value,
+            style = if (dense) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
     }
 }
@@ -774,13 +1077,33 @@ fun InfoRow(label: String, value: String) {
 
 @Composable
 fun SectionCard(content: @Composable () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) { content() }
+    val hazeState = LocalHazeState.current
+    val shape = RoundedCornerShape(Radius.card)
+    if (hazeState != null) {
+        // Frosted liquid-glass surface — blurs the screen backdrop behind it
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .glassEffect(hazeState, shape, glassStyle())
+                .border(1.dp, glassBorder(), shape)
+        ) {
+            Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) { content() }
+        }
+    } else {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(
+                    0.5.dp,
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
+                    shape
+                ),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            shape = shape,
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) { content() }
+        }
     }
 }
 
@@ -794,6 +1117,10 @@ fun ConnectingScreen(vm: AirPodsViewModel, state: AacpTransport.ConnectionState,
     val error by vm.connectionError.collectAsState()
     val isConnected = state == AacpTransport.ConnectionState.CONNECTED
 
+    LaunchedEffect(error) {
+        if (error != null) { kotlinx.coroutines.delay(4000); vm.clearConnectionError() }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -802,28 +1129,13 @@ fun ConnectingScreen(vm: AirPodsViewModel, state: AacpTransport.ConnectionState,
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        // AirPods case image with pulse
-        val pulse = rememberInfiniteTransition(label = "cp")
-        val scale by pulse.animateFloat(0.95f, 1.05f,
-            infiniteRepeatable(tween(1200), RepeatMode.Reverse), label = "cs")
-
-        // AirPods case image with subtle background
-        val isDark = MaterialTheme.colorScheme.background == me.arnabsaha.airpodscompanion.ui.theme.DarkBackground
-        Box(
-            modifier = Modifier
-                .size(160.dp)
-                .clip(RoundedCornerShape(28.dp))
-                .background(if (isDark) Color(0xFF1C1C1E) else Color(0xFFE0E0E8))
-                .scale(if (!isConnected) scale else 1f),
-            contentAlignment = Alignment.Center
-        ) {
-            androidx.compose.foundation.Image(
-                painter = androidx.compose.ui.res.painterResource(R.drawable.airpods_case),
-                contentDescription = "AirPods",
-                modifier = Modifier.size(120.dp),
-                contentScale = androidx.compose.ui.layout.ContentScale.Fit
-            )
-        }
+        ConnectionAnimation(
+            isConnecting = state == AacpTransport.ConnectionState.CONNECTING ||
+                state == AacpTransport.ConnectionState.HANDSHAKING ||
+                state == AacpTransport.ConnectionState.RECONNECTING,
+            isConnected = isConnected,
+            modifier = Modifier.size(200.dp)
+        )
 
         Spacer(Modifier.height(24.dp))
 
@@ -877,6 +1189,10 @@ fun DevicePickerScreen(vm: AirPodsViewModel) {
     val bondedDevices by vm.bondedAirPodsList.collectAsState()
     val deviceName by vm.bondedDeviceName.collectAsState()
     val error by vm.connectionError.collectAsState()
+
+    LaunchedEffect(error) {
+        if (error != null) { kotlinx.coroutines.delay(4000); vm.clearConnectionError() }
+    }
 
     Column(
         modifier = Modifier
@@ -1029,6 +1345,70 @@ fun LoadingScreen() {
             Spacer(Modifier.height(16.dp))
             Text("Starting AirBridge...", style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f))
+        }
+    }
+}
+
+/** Tracks the Bluetooth adapter's on/off state, updating live on ACTION_STATE_CHANGED. */
+@Composable
+fun rememberBluetoothEnabled(): Boolean {
+    val context = LocalContext.current
+    val adapter = remember { context.getSystemService(BluetoothManager::class.java)?.adapter }
+    var enabled by remember { mutableStateOf(adapter?.isEnabled == true) }
+    DisposableEffect(Unit) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context?, intent: Intent?) {
+                if (intent?.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
+                    enabled = adapter?.isEnabled == true
+                }
+            }
+        }
+        context.registerReceiver(receiver, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED))
+        onDispose { context.unregisterReceiver(receiver) }
+    }
+    return enabled
+}
+
+@Composable
+fun BluetoothOffScreen() {
+    val context = LocalContext.current
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(
+            Modifier.size(88.dp).clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Default.Bluetooth, null, Modifier.size(44.dp),
+                tint = MaterialTheme.colorScheme.primary)
+        }
+        Spacer(Modifier.height(24.dp))
+        Text("Bluetooth is off", style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
+        Spacer(Modifier.height(8.dp))
+        Text("Turn on Bluetooth to connect your AirPods.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+            textAlign = TextAlign.Center)
+        Spacer(Modifier.height(28.dp))
+        Button(
+            onClick = {
+                context.startActivity(
+                    Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            },
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            shape = RoundedCornerShape(14.dp)
+        ) {
+            Text("Turn On Bluetooth", style = MaterialTheme.typography.labelLarge, color = Color.White)
         }
     }
 }

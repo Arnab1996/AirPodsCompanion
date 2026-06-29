@@ -14,6 +14,7 @@ import android.view.View
 import android.view.WindowManager
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -38,6 +39,7 @@ class ConnectionPopup(private val context: Context) {
         private const val COOLDOWN_MS = 30_000L
         private const val SWIPE_THRESHOLD_DP = 50
         private const val SWIPE_VELOCITY_THRESHOLD = 500f // dp/s
+        private const val AUTO_DISMISS_MS = 4500L
     }
 
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -45,6 +47,7 @@ class ConnectionPopup(private val context: Context) {
     private var popupView: View? = null
     private var isShowing = false
     private var lastShowTime = 0L
+    private var autoDismissRunnable: Runnable? = null
 
     // View references for real-time updates
     private var leftBatteryBar: ProgressBar? = null
@@ -66,6 +69,7 @@ class ConnectionPopup(private val context: Context) {
         battery: AacpBatteryState?,
         ancMode: String,
         earState: EarState = EarState(),
+        codec: String = "",
         forceByCooldown: Boolean = false
     ) {
         // Cooldown — don't spam popups on rapid reconnects (unless forced by user action)
@@ -86,7 +90,7 @@ class ConnectionPopup(private val context: Context) {
 
         handler.post {
             try {
-                val view = createPopupView(deviceName, battery, ancMode, earState)
+                val view = createPopupView(deviceName, battery, ancMode, earState, codec)
                 val params = createLayoutParams()
 
                 windowManager.addView(view, params)
@@ -94,14 +98,20 @@ class ConnectionPopup(private val context: Context) {
                 isShowing = true
                 lastShowTime = now
 
-                view.translationY = -300f
+                view.translationY = -dp(80).toFloat()
                 view.alpha = 0f
                 view.animate()
                     .translationY(0f)
                     .alpha(1f)
-                    .setDuration(500)
-                    .setInterpolator(DecelerateInterpolator(1.5f))
+                    .setDuration(440)
+                    .setInterpolator(OvershootInterpolator(1.1f))
                     .start()
+
+                // Auto-dismiss after a few seconds; a swipe-up still dismisses early.
+                autoDismissRunnable?.let { handler.removeCallbacks(it) }
+                val auto = Runnable { dismiss() }
+                autoDismissRunnable = auto
+                handler.postDelayed(auto, AUTO_DISMISS_MS)
 
                 Log.d(TAG, "Popup shown for $deviceName")
             } catch (e: Exception) {
@@ -145,21 +155,30 @@ class ConnectionPopup(private val context: Context) {
         handler.post {
             val view = popupView ?: return@post
             if (!isShowing) return@post
+            isShowing = false
+            cancelAutoDismiss()
 
+            // Clean dismiss: a small lift + fade, snappy and smooth (no long slide).
             view.animate()
-                .translationY(-300f)
+                .translationY(-dp(28).toFloat())
                 .alpha(0f)
-                .setDuration(300)
-                .setInterpolator(AccelerateInterpolator())
+                .setDuration(200)
+                .setInterpolator(DecelerateInterpolator())
                 .withEndAction { forceRemoveView() }
                 .start()
 
-            // Safety net — force remove after animation timeout
-            handler.postDelayed({ forceRemoveView() }, 500)
+            // Safety net in case the animation is interrupted
+            handler.postDelayed({ forceRemoveView() }, 420)
         }
     }
 
+    private fun cancelAutoDismiss() {
+        autoDismissRunnable?.let { handler.removeCallbacks(it) }
+        autoDismissRunnable = null
+    }
+
     private fun forceRemoveView() {
+        cancelAutoDismiss()
         val view = popupView ?: return
         try {
             windowManager.removeView(view)
@@ -177,7 +196,8 @@ class ConnectionPopup(private val context: Context) {
         deviceName: String,
         battery: AacpBatteryState?,
         ancMode: String,
-        earState: EarState
+        earState: EarState,
+        codec: String = ""
     ): View {
         val container = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -214,6 +234,20 @@ class ConnectionPopup(private val context: Context) {
             setTypeface(typeface, android.graphics.Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         })
+
+        // Codec / LE-Audio badge on the right of the header
+        if (codec.isNotBlank()) {
+            headerRow.addView(TextView(context).apply {
+                text = codec
+                setTextColor(0xFFB6E5C0.toInt())
+                textSize = 9f
+                setPadding(dp(8), dp(3), dp(8), dp(3))
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = dp(10).toFloat()
+                    setColor(0x2634C759)
+                }
+            })
+        }
 
         container.addView(headerRow)
 
@@ -344,13 +378,15 @@ class ConnectionPopup(private val context: Context) {
         statusRow.addView(earRow)
         container.addView(statusRow)
 
-        // Wrap in FrameLayout with top padding
+        // Wrap in FrameLayout with top padding; cap the island width + center it
         val wrapper = FrameLayout(context).apply {
             val margin = dp(16)
             setPadding(margin, dp(48), margin, 0)
+            val maxWidth = minOf(dp(380), context.resources.displayMetrics.widthPixels - dp(40))
             addView(container, FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT
+                maxWidth,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER_HORIZONTAL
             ))
         }
 
@@ -388,9 +424,8 @@ class ConnectionPopup(private val context: Context) {
                         val threshold = SWIPE_THRESHOLD_DP * v.resources.displayMetrics.density
                         if (deltaY < -threshold || velocity < -SWIPE_VELOCITY_THRESHOLD) {
                             dismiss()
-                        } else if (kotlin.math.abs(deltaY) < 10) {
-                            dismiss()
                         } else {
+                            // Snap back — only a deliberate swipe-up dismisses (no tap action)
                             popupView?.animate()?.translationY(0f)?.setDuration(200)?.start()
                         }
                         return true
@@ -446,7 +481,7 @@ class ConnectionPopup(private val context: Context) {
 
         // Percentage
         val pctText = TextView(context).apply {
-            text = if (level >= 0) "${level}%" else "—"
+            text = if (level >= 0) "${level}%${if (isCharging) " ⚡" else ""}" else "—"
             setTextColor(if (isCharging) 0xFF34C759.toInt() else 0xB3FFFFFF.toInt())
             textSize = 11f
             gravity = Gravity.CENTER
@@ -459,7 +494,7 @@ class ConnectionPopup(private val context: Context) {
     private fun updateBatteryBar(bar: ProgressBar?, text: TextView?, level: Int, isCharging: Boolean) {
         bar?.progress = level.coerceAtLeast(0)
         bar?.progressTintList = ColorStateList.valueOf(getBatteryColor(level, isCharging))
-        text?.text = if (level >= 0) "${level}%" else "—"
+        text?.text = if (level >= 0) "${level}%${if (isCharging) " ⚡" else ""}" else "—"
         text?.setTextColor(if (isCharging) 0xFF34C759.toInt() else 0xB3FFFFFF.toInt())
     }
 

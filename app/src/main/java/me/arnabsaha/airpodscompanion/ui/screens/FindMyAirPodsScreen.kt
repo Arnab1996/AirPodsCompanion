@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -35,6 +37,9 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,6 +49,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import me.arnabsaha.airpodscompanion.ui.theme.AppleGray
+import me.arnabsaha.airpodscompanion.ui.theme.AppleGreen
+import me.arnabsaha.airpodscompanion.ui.theme.AppleOrange
+import me.arnabsaha.airpodscompanion.ui.theme.AppleRed
 import me.arnabsaha.airpodscompanion.viewmodel.AirPodsViewModel
 import kotlinx.coroutines.delay
 
@@ -56,6 +65,8 @@ fun FindMyAirPodsScreen(vm: AirPodsViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
     val nearestDevice by vm.nearestAirPods.collectAsState()
 
+    var found by remember { mutableStateOf(false) }
+
     val rssi = nearestDevice?.rssi ?: -100
     val proximity = ((rssi + 100) / 70.0 * 100).coerceIn(0.0, 100.0).toInt()
 
@@ -63,9 +74,9 @@ fun FindMyAirPodsScreen(vm: AirPodsViewModel, onBack: () -> Unit) {
     LaunchedEffect(Unit) { vm.startFindMyScan() }
     DisposableEffect(Unit) { onDispose { vm.stopFindMyScan() } }
 
-    // Haptic feedback — pulses faster as proximity increases
-    LaunchedEffect(proximity) {
-        if (proximity > 10) {
+    // Haptic feedback — pulses faster as proximity increases; stops once the user taps "Found It"
+    LaunchedEffect(proximity, found) {
+        if (proximity > 10 && !found) {
             val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val mgr = context.getSystemService(VibratorManager::class.java)
                 mgr.defaultVibrator
@@ -94,10 +105,10 @@ fun FindMyAirPodsScreen(vm: AirPodsViewModel, onBack: () -> Unit) {
     )
 
     val proximityColor = when {
-        proximity > 70 -> Color(0xFF34C759)   // Green — very close
-        proximity > 40 -> Color(0xFFFF9500)   // Orange — medium
-        proximity > 15 -> Color(0xFFFF3B30)   // Red — far
-        else -> Color(0xFF8E8E93)              // Gray — no signal
+        proximity > 70 -> AppleGreen   // very close
+        proximity > 40 -> AppleOrange  // medium
+        proximity > 15 -> AppleRed     // far
+        else -> AppleGray              // no signal
     }
 
     Column(
@@ -171,7 +182,7 @@ fun FindMyAirPodsScreen(vm: AirPodsViewModel, onBack: () -> Unit) {
                         .clip(RoundedCornerShape(4.dp))
                         .background(
                             if (isActive) proximityColor.copy(alpha = pulseAlpha)
-                            else Color(0xFF3A3A3C)
+                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
                         )
                 )
             }
@@ -179,20 +190,25 @@ fun FindMyAirPodsScreen(vm: AirPodsViewModel, onBack: () -> Unit) {
 
         Spacer(Modifier.height(40.dp))
 
-        // RSSI debug info
         Text(
-            text = "RSSI: ${rssi}dBm",
-            style = MaterialTheme.typography.bodySmall,
-            color = Color(0xFF8E8E93)
-        )
-
-        Spacer(Modifier.height(16.dp))
-
-        Text(
-            text = "Walk around slowly.\nThe signal gets stronger as you get closer to your AirPods.",
+            text = "Walk around slowly. The signal gets stronger as you get closer to your AirPods.",
             style = MaterialTheme.typography.bodyMedium,
-            color = Color(0xFF8E8E93),
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
             textAlign = TextAlign.Center
         )
+
+        Spacer(Modifier.weight(1f))
+
+        // Found It — stops the proximity buzz and returns to the dashboard
+        Button(
+            onClick = { found = true; onBack() },
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = AppleGreen)
+        ) {
+            Text("Found It", style = MaterialTheme.typography.labelLarge, color = Color.White)
+        }
+
+        Spacer(Modifier.height(24.dp))
     }
 }

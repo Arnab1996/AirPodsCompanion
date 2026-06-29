@@ -54,8 +54,11 @@ class BatteryAlertManager(private val context: Context) {
         checkComponent("Right", battery.rightLevel, threshold, NOTIF_RIGHT, lastAlertedRight)?.let {
             lastAlertedRight = it
         }
-        checkComponent("Case", battery.caseLevel, threshold, NOTIF_CASE, lastAlertedCase)?.let {
-            lastAlertedCase = it
+        // Only alert for the case when it's NOT charging — a case on a charger isn't actionable
+        if (!battery.caseCharging) {
+            checkComponent("Case", battery.caseLevel, threshold, NOTIF_CASE, lastAlertedCase)?.let {
+                lastAlertedCase = it
+            }
         }
 
         // Reset alerts if level rises above threshold
@@ -104,7 +107,7 @@ class BatteryAlertManager(private val context: Context) {
         val notification = Notification.Builder(context, CHANNEL_ID)
             .setContentTitle("Low Battery: $component")
             .setContentText("$component AirPod is at $level%")
-            .setSmallIcon(android.R.drawable.stat_sys_warning)
+            .setSmallIcon(me.arnabsaha.airpodscompanion.R.drawable.ic_stat_airbridge)
             .setContentIntent(tapIntent)
             .setAutoCancel(true)
             .build()

@@ -140,6 +140,12 @@ class AirPodsService : Service() {
     private val _ancMode = MutableStateFlow<Byte>(0x01) // OFF by default
     val ancMode: StateFlow<Byte> = _ancMode.asStateFlow()
 
+    // Head gesture events surfaced to the UI: (sequence, "nod"|"shake"). Sequence increments
+    // each time so the UI can flash feedback even for two identical gestures in a row.
+    private val _headGesture = MutableStateFlow<Pair<Long, String>?>(null)
+    val headGesture: StateFlow<Pair<Long, String>?> = _headGesture.asStateFlow()
+    private var headGestureSeq = 0L
+
     // List of all bonded AirPods devices
     private val _bondedAirPodsList = MutableStateFlow<List<BondedAirPods>>(emptyList())
     val bondedAirPodsList: StateFlow<List<BondedAirPods>> = _bondedAirPodsList.asStateFlow()
@@ -207,10 +213,18 @@ class AirPodsService : Service() {
                     headTrackingActive = false
                     connectedBtDevice = null
                     connectionPopup.dismiss()
-                    updateNotificationImmediate("Bluetooth is off")
+                    // Bluetooth off → nothing to manage; drop the foreground notification so
+                    // AirBridge stops showing under "Active apps".
+                    stopForeground(Service.STOP_FOREGROUND_REMOVE)
                 }
                 BluetoothAdapter.STATE_ON -> {
                     Log.d(TAG, "Bluetooth turned ON — restarting")
+                    // Re-promote to foreground (we demoted ourselves when BT turned off)
+                    try {
+                        startForeground(NOTIFICATION_ID, buildServiceNotification())
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Re-promote to foreground failed: ${e.message}")
+                    }
                     scanner.startScan()
                     startPruneLoop()
                     handler.postDelayed({ autoConnect() }, 2000) // Delay for BT stack to initialize
@@ -260,7 +274,7 @@ class AirPodsService : Service() {
                         _aacpBattery.value = null // Clear stale battery data
                     }
                     a2dpUnlatchRunnable = runnable
-                    handler.postDelayed(runnable, 10_000)
+                    handler.postDelayed(runnable, 6_000)
                 }
             }
         }
@@ -310,9 +324,6 @@ class AirPodsService : Service() {
 
         // Auto-connect to bonded AirPods on service start
         autoConnect()
-
-        // Show initial info notification
-        updateNotificationImmediate("Scanning for AirPods...")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -351,6 +362,7 @@ class AirPodsService : Service() {
             _aacpBattery.value,
             ancName,
             _earState.value,
+            codec = _leAudioCapability.value?.displayText ?: "",
             forceByCooldown = true
         )
     }
@@ -413,7 +425,9 @@ class AirPodsService : Service() {
      * Called on service start — no user interaction needed.
      */
     @SuppressLint("MissingPermission")
-    fun autoConnect() {
+    fun autoConnect(userInitiated: Boolean = false) {
+        if (userInitiated) userDisconnected = false
+        if (userDisconnected) return  // user manually disconnected — don't auto-reconnect
         if (_transport.isConnected) return
 
         val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter ?: return
@@ -456,8 +470,8 @@ class AirPodsService : Service() {
         Log.d(TAG, "Connecting to: ${device.name} (${device.address})")
         _bondedDeviceName.value = device.name ?: "AirPods"
         connectedBtDevice = device
+        userDisconnected = false  // explicit connect clears the manual-disconnect suppress
         _leAudioCapability.value = me.arnabsaha.airpodscompanion.ble.LeAudioDetector.detect(device)
-        updateNotificationImmediate("Connecting to ${device.name}...")
 
         // Save as last connected
         getSharedPreferences("airbridge_settings", MODE_PRIVATE)
@@ -481,6 +495,69 @@ class AirPodsService : Service() {
     fun connectToDevice(bleAddress: String) {
         autoConnect()
     }
+
+    /**
+     * User-initiated disconnect. Drops the AACP link, suppresses auto-reconnect via
+     * [userDisconnected], clears live state, and restarts the scanner so the device
+     * picker is live again. The flag is cleared the moment the user reconnects.
+     */
+    @SuppressLint("MissingPermission")
+    fun disconnectManually() {
+        Log.d(TAG, "Manual disconnect requested")
+        userDisconnected = true
+        _transport.disconnect()
+        _isBluetoothProfileConnected.value = false
+        _aacpBattery.value = null
+        _deviceInfo.value = null
+        connectedBtDevice = null
+        hasConnectedOnce = false
+        _bondedAirPodsList.value = _bondedAirPodsList.value.map { it.copy(isCurrentlyConnected = false) }
+        if (!scanner.isScanning()) {
+            scanner.startScan()
+            startPruneLoop()
+        }
+        me.arnabsaha.airpodscompanion.intents.IntentBroadcaster.broadcastDisconnected(this)
+    }
+
+    /**
+     * Forget (unpair) the AirPods. Drops the link, then calls the hidden
+     * BluetoothDevice.removeBond() via HiddenApiBypass (same mechanism as the L2CAP socket).
+     * After this the system shows the AirPods as unpaired.
+     */
+    @SuppressLint("MissingPermission")
+    fun forgetDevice() {
+        val device = connectedBtDevice ?: run {
+            val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter
+            val lastAddr = getSharedPreferences("airbridge_settings", MODE_PRIVATE)
+                .getString("last_connected_address", null)
+            adapter?.bondedDevices?.firstOrNull { it.address == lastAddr }
+        }
+        Log.d(TAG, "Forget requested for ${device?.address}")
+        userDisconnected = true
+        _transport.disconnect()
+        if (device != null) {
+            try {
+                HiddenApiBypass.invoke(BluetoothDevice::class.java, device, "removeBond")
+                Log.d(TAG, "removeBond() invoked")
+            } catch (e: Exception) {
+                Log.w(TAG, "removeBond failed: ${e.message}")
+            }
+        }
+        _isBluetoothProfileConnected.value = false
+        _aacpBattery.value = null
+        _deviceInfo.value = null
+        connectedBtDevice = null
+        hasConnectedOnce = false
+        _bondedAirPodsList.value = _bondedAirPodsList.value.filterNot { it.address == device?.address }
+        if (!scanner.isScanning()) {
+            scanner.startScan()
+            startPruneLoop()
+        }
+        me.arnabsaha.airpodscompanion.intents.IntentBroadcaster.broadcastDisconnected(this)
+    }
+
+    /** Send a media key (used by ear-detection and auto-resume). */
+    fun playMedia() = sendMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY)
 
     /** Set noise control mode: OFF, ANC, TRANSPARENCY, ADAPTIVE */
     fun setNoiseControlMode(mode: Byte) {
@@ -517,6 +594,15 @@ class AirPodsService : Service() {
             ControlCommandId.CHIME_VOLUME,
             volume.coerceIn(0, 100).toByte()
         )
+    }
+
+    /**
+     * Best-effort audio preview: re-assert the current listening mode so the AirPods replay
+     * their mode chime at the just-set chime volume, letting the user hear how loud it is.
+     * The mode doesn't actually change. May be a no-op on some firmware.
+     */
+    fun playChimePreview() {
+        transport.sendControlCommand(ControlCommandId.LISTENING_MODE, _ancMode.value)
     }
 
     /** Rename AirPods (opcode 0x1E). Note: re-pairing needed for Android BT settings to reflect the new name. */
@@ -622,6 +708,9 @@ class AirPodsService : Service() {
 
     private var hasConnectedOnce = false
 
+    /** Set when the user taps Disconnect; suppresses auto-reconnect until they reconnect. */
+    @Volatile private var userDisconnected = false
+
     private fun setupA2dpMonitor() {
         val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter ?: return
         adapter.getProfileProxy(this, a2dpProfileListener, BluetoothProfile.A2DP)
@@ -682,8 +771,17 @@ class AirPodsService : Service() {
                                 _bondedDeviceName.value ?: "AirPods",
                                 _aacpBattery.value,
                                 ancName,
-                                _earState.value
+                                _earState.value,
+                                codec = _leAudioCapability.value?.displayText ?: ""
                             )
+                            // Auto-resume media if the user enabled it
+                            if (getSharedPreferences("airbridge_settings", MODE_PRIVATE)
+                                    .getBoolean("auto_resume", false)) {
+                                serviceScope.launch {
+                                    kotlinx.coroutines.delay(1500)
+                                    if (_transport.isConnected) sendMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY)
+                                }
+                            }
                         }
                     }
                     AacpTransport.ConnectionState.DISCONNECTED -> {
@@ -699,27 +797,19 @@ class AirPodsService : Service() {
                         }
                         hasConnectedOnce = false
                         _isBluetoothProfileConnected.value = false // Reset A2DP latch
-                        resetInfoNotificationDismissed() // Allow notification to show again on next connection
                         batteryAlertManager.resetAlerts()
                         me.arnabsaha.airpodscompanion.intents.IntentBroadcaster.broadcastDisconnected(this@AirPodsService)
                     }
                     else -> {}
                 }
 
-                val battery = _aacpBattery.value
-                val text = when (state) {
-                    AacpTransport.ConnectionState.DISCONNECTED -> "Scanning for AirPods..."
-                    AacpTransport.ConnectionState.CONNECTING -> "Connecting..."
-                    AacpTransport.ConnectionState.HANDSHAKING -> "Handshaking..."
-                    AacpTransport.ConnectionState.CONNECTED -> {
-                        if (battery != null) {
-                            "L: ${battery.leftLevel}%  R: ${battery.rightLevel}%  Case: ${if (battery.caseLevel >= 0) "${battery.caseLevel}%" else "--"}"
-                        } else "Connected to ${_bondedDeviceName.value ?: "AirPods"}"
-                    }
-                    AacpTransport.ConnectionState.RECONNECTING -> "Reconnecting..."
-                    AacpTransport.ConnectionState.FAILED -> "Connection failed"
+                // Single notification reflects the live state — battery when connected,
+                // a calm "Searching…" otherwise (no separate connecting/scanning entry).
+                if (state == AacpTransport.ConnectionState.CONNECTED) {
+                    updateNotificationImmediate("")
+                } else {
+                    updateNotificationImmediate("Searching for AirPods…")
                 }
-                updateNotificationImmediate(text)
             }
         }
     }
@@ -881,6 +971,7 @@ class AirPodsService : Service() {
                 syncToWatch()
                 connectionPopup.updateContent(_aacpBattery.value, value, _earState.value)
                 me.arnabsaha.airpodscompanion.intents.IntentBroadcaster.broadcastAncMode(this@AirPodsService, value)
+                flushNotification()  // keep the notification's ANC label in sync
             }
             ControlCommandId.CONVERSATION_AWARENESS -> {
                 val state = if (value == 0x01.toByte()) "ON" else "OFF"
@@ -991,16 +1082,32 @@ class AirPodsService : Service() {
             val text = String(payload, Charsets.UTF_8)
             val parts = text.split("\u0000").filter { it.isNotBlank() }
 
-            if (parts.size >= 4) {
-                val info = DeviceInfo(
-                    name = parts.getOrNull(0) ?: "",
-                    modelNumber = parts.getOrNull(1) ?: "",
-                    serialNumber = parts.getOrNull(3) ?: "",
-                    firmwareVersion = parts.getOrNull(4) ?: ""
-                )
-                _deviceInfo.value = info
-                Log.d(TAG, "Device: name=${info.name} model=${info.modelNumber} serial=${info.serialNumber} fw=${info.firmwareVersion}")
-            }
+            // Log every field so the order can be verified per firmware
+            Log.d(TAG, "Device info parts: ${parts.mapIndexed { i, s -> "[$i]=$s" }}")
+
+            // Field order varies by firmware, so identify fields by CONTENT, not fixed index:
+            //  - model:    Apple part number like A3048 / A2698 (A + digits)
+            //  - serial:   longer alphanumeric (8–18) that isn't the model or "Apple Inc."
+            //  - firmware: a short token with a digit that isn't the name/model/serial/maker
+            val name = parts.firstOrNull() ?: ""
+            val model = parts.firstOrNull {
+                it.length in 4..6 && it.first() == 'A' && it.drop(1).all { c -> c.isDigit() }
+            } ?: ""
+            val serial = parts.firstOrNull {
+                it != model && !it.contains("Apple", ignoreCase = true) &&
+                it.length in 8..18 && it.any { c -> c.isDigit() } && it.any { c -> c.isLetter() }
+            } ?: ""
+            val firmware = parts.firstOrNull {
+                it != name && it != model && it != serial &&
+                !it.contains("Apple", ignoreCase = true) &&
+                it.length <= 12 && it.any { c -> c.isDigit() }
+            } ?: ""
+
+            _deviceInfo.value = DeviceInfo(
+                name = name, modelNumber = model,
+                serialNumber = serial, firmwareVersion = firmware
+            )
+            Log.d(TAG, "Device parsed: name=$name model=$model serial=$serial fw=$firmware")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to parse device info: ${e.message}")
         }
@@ -1036,10 +1143,12 @@ class AirPodsService : Service() {
                 when (gesture) {
                     HeadGestureDetector.Gesture.NOD_YES -> {
                         Log.d(TAG, "HEAD GESTURE: NOD (YES) — answering call")
+                        headGestureSeq++; _headGesture.value = headGestureSeq to "nod"
                         answerCall()
                     }
                     HeadGestureDetector.Gesture.SHAKE_NO -> {
                         Log.d(TAG, "HEAD GESTURE: SHAKE (NO) — declining call")
+                        headGestureSeq++; _headGesture.value = headGestureSeq to "shake"
                         declineCall()
                     }
                     else -> {}
@@ -1174,15 +1283,18 @@ class AirPodsService : Service() {
         flushNotification()
     }
 
+    /** Re-post the single AirBridge notification (ID = NOTIFICATION_ID). */
     private fun flushNotification() {
         notificationUpdateRunnable?.let { handler.removeCallbacks(it) }
         notificationUpdateRunnable = null
-        val text = pendingNotificationText ?: return
         lastNotificationUpdateMs = System.currentTimeMillis()
-        val manager = getSystemService(NotificationManager::class.java)
-        if (!isInfoNotificationDismissed()) {
-            manager.notify(INFO_NOTIFICATION_ID, buildInfoNotification(text))
-        }
+        getSystemService(NotificationManager::class.java)
+            .notify(NOTIFICATION_ID, buildServiceNotification())
+    }
+
+    /** Called when the app UI opens — refresh the notification. */
+    fun onAppOpened() {
+        flushNotification()
     }
 
     private fun startPruneLoop() {
@@ -1227,6 +1339,11 @@ class AirPodsService : Service() {
         manager.deleteNotificationChannel("airpods_connection")
     }
 
+    /**
+     * The single AirBridge notification. It IS the foreground-service notification (Android
+     * requires exactly one), so there is no second "Running" entry. Rich when connected
+     * (battery + ANC actions), minimal otherwise.
+     */
     private fun buildServiceNotification(): Notification {
         val tapIntent = PendingIntent.getActivity(
             this, 0,
@@ -1234,48 +1351,34 @@ class AirPodsService : Service() {
                 .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE
         )
-        return Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("AirBridge")
-            .setContentText("Running")
-            .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
-            .setContentIntent(tapIntent)
-            .setOngoing(true)
-            .build()
-    }
-
-    private fun buildInfoNotification(text: String): Notification {
-        val tapIntent = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, me.arnabsaha.airpodscompanion.MainActivity::class.java)
-                .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
-            PendingIntent.FLAG_IMMUTABLE
-        )
-        val deleteIntent = PendingIntent.getBroadcast(
-            this, 0,
-            Intent().setAction(me.arnabsaha.airpodscompanion.receivers.NotificationDismissReceiver.ACTION_DISMISSED)
-                .setPackage(packageName),
-            PendingIntent.FLAG_IMMUTABLE
-        )
 
         val battery = _aacpBattery.value
-        val title = if (battery != null && _transport.isConnected) {
-            "\uD83C\uDFA7 ${_bondedDeviceName.value ?: "AirPods"}"
-        } else "AirBridge"
+        val connected = _transport.isConnected
+        val title = if (connected) (_bondedDeviceName.value ?: "AirPods") else "AirBridge"
+        val content = when {
+            connected && battery != null ->
+                "L: ${battery.leftLevel}%  R: ${battery.rightLevel}%  Case: ${if (battery.caseLevel >= 0) "${battery.caseLevel}%" else "—"}"
+            connected -> "Connected"
+            else -> pendingNotificationText?.takeIf { it.isNotBlank() } ?: "Searching for AirPods…"
+        }
 
-        val content = if (battery != null && _transport.isConnected) {
-            "L: ${battery.leftLevel}%  R: ${battery.rightLevel}%  Case: ${if (battery.caseLevel >= 0) "${battery.caseLevel}%" else "—"}"
-        } else text
-
+        // Visible-but-silent channel so the one notification still shows battery at a glance
         val builder = Notification.Builder(this, INFO_CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(content)
-            .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
+            .setSmallIcon(me.arnabsaha.airpodscompanion.R.drawable.ic_stat_airbridge)
             .setContentIntent(tapIntent)
-            .setDeleteIntent(deleteIntent)
-            .setOngoing(false)
+            .setOngoing(true)
 
-        // Add Quick View action when connected
-        if (_transport.isConnected) {
+        if (connected && battery != null) {
+            builder.setLargeIcon(
+                android.graphics.drawable.Icon.createWithResource(
+                    this, me.arnabsaha.airpodscompanion.R.drawable.airpods_case
+                )
+            )
+        }
+
+        if (connected) {
             val popupIntent = PendingIntent.getService(
                 this, 1,
                 Intent(this, AirPodsService::class.java).setAction(ACTION_SHOW_POPUP),
@@ -1283,7 +1386,6 @@ class AirPodsService : Service() {
             )
             builder.addAction(Notification.Action.Builder(null, "Quick View", popupIntent).build())
 
-            // ANC cycle action
             val ancIntent = PendingIntent.getService(
                 this, 2,
                 Intent(this, AirPodsService::class.java).setAction(ACTION_CYCLE_ANC),
@@ -1300,28 +1402,5 @@ class AirPodsService : Service() {
         }
 
         return builder.build()
-    }
-
-    private fun isInfoNotificationDismissed(): Boolean {
-        return getSharedPreferences("airbridge_settings", MODE_PRIVATE)
-            .getBoolean("info_notification_dismissed", false)
-    }
-
-    private fun resetInfoNotificationDismissed() {
-        getSharedPreferences("airbridge_settings", MODE_PRIVATE)
-            .edit()
-            .putBoolean("info_notification_dismissed", false)
-            .apply()
-    }
-
-    /** Called when the app UI opens — resets notification dismissed state */
-    fun onAppOpened() {
-        if (isInfoNotificationDismissed()) {
-            resetInfoNotificationDismissed()
-            if (_transport.isConnected && _aacpBattery.value != null) {
-                val battery = _aacpBattery.value!!
-                updateNotification("L: ${battery.leftLevel}%  R: ${battery.rightLevel}%  Case: ${if (battery.caseLevel >= 0) "${battery.caseLevel}%" else "--"}")
-            }
-        }
     }
 }

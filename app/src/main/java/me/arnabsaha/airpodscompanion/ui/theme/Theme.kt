@@ -12,13 +12,24 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.dp
 
-// Apple system colors — consistent across light/dark
-val AppleBlue = Color(0xFF007AFF)
-val AppleBlueDark = Color(0xFF0A84FF)
-val AppleGreen = Color(0xFF34C759)
-val AppleRed = Color(0xFFFF3B30)
-val AppleOrange = Color(0xFFFF9500)
+// ── Layout tokens — single source of truth; plain objects, no CompositionLocal ──
+object Spacing {
+    val xs = 4.dp
+    val s = 8.dp
+    val m = 12.dp
+    val l = 16.dp
+    val xl = 20.dp
+    val xxl = 24.dp
+    val section = 32.dp
+}
+
+object Radius {
+    val card = 18.dp
+    val control = 12.dp
+    val chip = 8.dp
+}
 
 private val DarkColorScheme = darkColorScheme(
     primary = AppleBlueDark,

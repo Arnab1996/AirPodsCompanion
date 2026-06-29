@@ -4,7 +4,11 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,13 +31,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.wear.compose.material.Button
-import androidx.wear.compose.material.ButtonDefaults
 import androidx.wear.compose.material.CircularProgressIndicator
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
@@ -49,6 +60,19 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
 private const val TAG = "WearMain"
+
+/** Shared Apple-system palette so the watch matches the phone exactly. */
+object WearColors {
+    val Blue = Color(0xFF0A84FF)
+    val Green = Color(0xFF34C759)
+    val Orange = Color(0xFFFF9500)
+    val Red = Color(0xFFFF3B30)
+    val Surface = Color(0xFF1C1C1E)
+    // Glass backdrop — same deep navy→black + glow as the phone dashboard
+    val GradTop = Color(0xFF101D38)
+    val GradBottom = Color(0xFF000000)
+    val Glow = Color(0xFF0A84FF)
+}
 
 class WearMainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
 
@@ -143,12 +167,32 @@ class WearMainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
         }
     }
 
+    /** Deep navy→black gradient with a soft accent glow — the watch's take on the glass look. */
+    @Composable
+    fun GlassBackground(content: @Composable () -> Unit) {
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            Canvas(Modifier.fillMaxSize()) {
+                drawRect(Brush.verticalGradient(listOf(WearColors.GradTop, WearColors.GradBottom)))
+                val glowCenter = Offset(size.width * 0.5f, size.height * 0.16f)
+                val glowRadius = size.minDimension * 0.75f
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        listOf(WearColors.Glow.copy(alpha = 0.26f), Color.Transparent),
+                        center = glowCenter, radius = glowRadius
+                    ),
+                    radius = glowRadius, center = glowCenter
+                )
+            }
+            content()
+        }
+    }
+
     @Composable
     fun DashboardScreen() {
+        GlassBackground {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black)
                 .padding(8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
@@ -183,7 +227,7 @@ class WearMainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
                 0x04 -> "Adaptive"
                 else -> "ANC"
             }
-            Text(ancName, fontSize = 11.sp, color = Color(0xFF007AFF), fontWeight = FontWeight.Bold)
+            Text(ancName, fontSize = 11.sp, color = WearColors.Blue, fontWeight = FontWeight.Bold)
 
             Spacer(Modifier.height(6.dp))
 
@@ -194,6 +238,7 @@ class WearMainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
                 AncButton("A", ancMode == 0x04) { sendCommand(DataPaths.CMD_ANC_ADAPTIVE) }
             }
         }
+        }
     }
 
     @Composable
@@ -201,13 +246,37 @@ class WearMainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
         val progress = if (level > 0) level / 100f else 0f
         val color = when {
             level < 0 -> Color.Gray
-            level <= 10 -> Color(0xFFFF3B30)
-            level <= 20 -> Color(0xFFFF9500)
-            else -> Color(0xFF34C759)
+            level <= 10 -> WearColors.Red
+            level <= 20 -> WearColors.Orange
+            else -> WearColors.Green
         }
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(44.dp)) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(48.dp)) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val sw = 4.dp.toPx()
+                    // Recessed well — inset radial gradient gives the ring neumorphic depth
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            listOf(Color.White.copy(alpha = 0.05f), Color.Black.copy(alpha = 0.28f)),
+                            center = center, radius = size.minDimension / 2f
+                        ),
+                        radius = size.minDimension / 2f - sw
+                    )
+                    if (level >= 0) {
+                        // Soft glow tracing the level, under the crisp indicator
+                        val inset = sw / 2f
+                        drawArc(
+                            color = color.copy(alpha = 0.28f),
+                            startAngle = -90f,
+                            sweepAngle = 360f * progress,
+                            useCenter = false,
+                            topLeft = Offset(inset, inset),
+                            size = Size(size.width - inset * 2, size.height - inset * 2),
+                            style = Stroke(sw * 1.9f, cap = StrokeCap.Round)
+                        )
+                    }
+                }
                 CircularProgressIndicator(
                     progress = progress,
                     modifier = Modifier.fillMaxSize(),
@@ -226,7 +295,7 @@ class WearMainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
             Spacer(Modifier.height(2.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (inEar) {
-                    Box(Modifier.size(4.dp).clip(CircleShape).background(Color(0xFF34C759)))
+                    Box(Modifier.size(4.dp).clip(CircleShape).background(WearColors.Green))
                     Spacer(Modifier.width(2.dp))
                 }
                 Text(label, fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
@@ -236,27 +305,49 @@ class WearMainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
 
     @Composable
     fun AncButton(label: String, selected: Boolean, onClick: () -> Unit) {
-        Button(
-            onClick = onClick,
-            modifier = Modifier.size(36.dp),
-            colors = ButtonDefaults.buttonColors(
-                backgroundColor = if (selected) Color(0xFF007AFF) else Color(0xFF1C1C1E)
-            )
+        val haptic = LocalHapticFeedback.current
+        // Selected = raised blue glass pill; others = translucent inset glass
+        val fill = if (selected)
+            Brush.verticalGradient(listOf(WearColors.Blue, WearColors.Blue.copy(alpha = 0.82f)))
+        else
+            Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.14f), Color.White.copy(alpha = 0.05f)))
+        Box(
+            modifier = Modifier
+                .size(46.dp)
+                .clip(CircleShape)
+                .background(fill)
+                .border(1.dp, Color.White.copy(alpha = if (selected) 0.25f else 0.10f), CircleShape)
+                .clickable {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onClick()
+                },
+            contentAlignment = Alignment.Center
         ) {
-            Text(label, fontSize = 9.sp, color = Color.White, textAlign = TextAlign.Center)
+            Text(
+                label,
+                fontSize = 11.sp,
+                color = if (selected) Color.White else Color.White.copy(alpha = 0.8f),
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                textAlign = TextAlign.Center
+            )
         }
     }
 
     @Composable
     fun DisconnectedScreen() {
+        GlassBackground {
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black),
+                .fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text("🎧", fontSize = 32.sp)
+            Image(
+                painter = painterResource(R.drawable.ic_headphones),
+                contentDescription = null,
+                modifier = Modifier.size(36.dp),
+                colorFilter = ColorFilter.tint(WearColors.Blue)
+            )
             Spacer(Modifier.height(8.dp))
             Text("AirBridge", fontSize = 14.sp, color = Color.White, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(4.dp))
@@ -266,6 +357,7 @@ class WearMainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
                 color = Color.White.copy(alpha = 0.5f),
                 textAlign = TextAlign.Center
             )
+        }
         }
     }
 }

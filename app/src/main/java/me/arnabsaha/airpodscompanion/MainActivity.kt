@@ -172,13 +172,20 @@ fun MainScreen(vm: AirPodsViewModel) {
 
         val connState by vm.connectionState.collectAsState()
         val btProfileConnected by vm.isBluetoothProfileConnected.collectAsState()
+        val gateEarState by vm.earState.collectAsState()
+        val bothInCase = gateEarState.leftInCase && gateEarState.rightInCase
 
-        // Once we land on the dashboard, stay there through brief AACP reconnects.
-        // A transient drop flips to RECONNECTING within a frame, so we only leave the
-        // dashboard if the link stays fully DISCONNECTED (manual disconnect) or FAILED.
+        // Show the dashboard only while the AirPods are actually in use. Stay through brief AACP
+        // reconnects, but revert to the picker quickly once they're stowed (both in case), the
+        // audio profile drops, or the link fails — no long "Reconnecting…" limbo.
         var showDashboard by remember { mutableStateOf(false) }
-        LaunchedEffect(connState, btProfileConnected) {
+        LaunchedEffect(connState, btProfileConnected, bothInCase) {
             when {
+                // Both buds back in the case → user is done; return to origin promptly.
+                bothInCase -> {
+                    kotlinx.coroutines.delay(600)
+                    showDashboard = false
+                }
                 connState == AacpTransport.ConnectionState.CONNECTED && btProfileConnected -> {
                     if (!showDashboard) {
                         kotlinx.coroutines.delay(400)
@@ -186,13 +193,16 @@ fun MainScreen(vm: AirPodsViewModel) {
                     }
                 }
                 connState == AacpTransport.ConnectionState.FAILED -> showDashboard = false
+                // Audio profile gone (latch already expired) → real disconnect.
+                !btProfileConnected -> {
+                    kotlinx.coroutines.delay(800)
+                    showDashboard = false
+                }
                 connState == AacpTransport.ConnectionState.DISCONNECTED -> {
-                    // If this is a transient drop, connState changes (→ RECONNECTING) and
-                    // cancels this effect before the delay completes, so we stay put.
                     kotlinx.coroutines.delay(1200)
                     showDashboard = false
                 }
-                // CONNECTING / HANDSHAKING / RECONNECTING: hold the current screen
+                // CONNECTING / HANDSHAKING / RECONNECTING with audio still latched: hold.
             }
         }
 
@@ -200,9 +210,13 @@ fun MainScreen(vm: AirPodsViewModel) {
         val screen = when {
             !btEnabled -> "bt_off"
             showDashboard -> "dashboard"
-            connState == AacpTransport.ConnectionState.DISCONNECTED ||
-            connState == AacpTransport.ConnectionState.FAILED -> "picker"
-            else -> "connecting"
+            // Active first-time connect → connecting animation. Anything else (disconnected,
+            // failed, or reconnecting to an unreachable device) → the picker, so the user gets
+            // an actionable screen instead of staring at "Reconnecting…".
+            connState == AacpTransport.ConnectionState.CONNECTING ||
+            connState == AacpTransport.ConnectionState.HANDSHAKING ||
+            connState == AacpTransport.ConnectionState.CONNECTED -> "connecting"
+            else -> "picker"
         }
         AnimatedContent(
             targetState = screen,
@@ -258,6 +272,7 @@ fun DashboardScreen(vm: AirPodsViewModel) {
     val stemAction by vm.stemAction.collectAsState()
     val allowOff by vm.allowOff.collectAsState()
     val deviceInfo by vm.deviceInfo.collectAsState()
+    val autoResume by vm.autoResume.collectAsState()
 
     val hazeState = rememberGlassState()
     Box(modifier = Modifier.fillMaxSize()) {
@@ -387,6 +402,9 @@ fun DashboardScreen(vm: AirPodsViewModel) {
             Divider()
             SettingToggle("Volume Swipe", "Swipe the stem to adjust volume",
                 enabled = volumeSwipe, onToggle = { vm.setVolumeSwipe(it) })
+            Divider()
+            SettingToggle("Resume Music on Connect", "Start playback automatically when your AirPods connect",
+                enabled = autoResume, onToggle = { vm.setAutoResume(it) })
         }
 
         Spacer(Modifier.height(20.dp))
@@ -561,18 +579,20 @@ fun DashboardScreen(vm: AirPodsViewModel) {
 
         Spacer(Modifier.height(8.dp))
 
-        val forgetCtx = LocalContext.current
+        var showForgetDialog by remember { mutableStateOf(false) }
         androidx.compose.material3.TextButton(
-            onClick = {
-                forgetCtx.startActivity(
-                    Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
-            },
+            onClick = { showForgetDialog = true },
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("Forget This Device", style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+        }
+        if (showForgetDialog) {
+            ForgetConfirmDialog(
+                deviceName = deviceName ?: "AirPods",
+                onDismiss = { showForgetDialog = false },
+                onConfirm = { vm.forgetDevice(); showForgetDialog = false }
+            )
         }
 
         Spacer(Modifier.height(32.dp))
@@ -638,19 +658,19 @@ fun StemActionDialog(current: String, onDismiss: () -> Unit, onSelect: (String) 
     val options = listOf("Noise Control", "Voice Assistant")
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Press and Hold", style = MaterialTheme.typography.titleLarge) },
+        title = { Text("Press and Hold", style = MaterialTheme.typography.titleMedium) },
         text = {
             Column {
                 options.forEach { option ->
                     Row(
                         modifier = Modifier.fillMaxWidth()
                             .clickable { onSelect(option) }
-                            .padding(vertical = 12.dp),
+                            .padding(vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(selected = current == option, onClick = { onSelect(option) })
-                        Spacer(Modifier.width(8.dp))
-                        Text(option, style = MaterialTheme.typography.bodyLarge,
+                        Spacer(Modifier.width(6.dp))
+                        Text(option, style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface)
                     }
                 }
@@ -680,6 +700,30 @@ fun DisconnectConfirmDialog(deviceName: String, onDismiss: () -> Unit, onConfirm
         confirmButton = {
             androidx.compose.material3.TextButton(onClick = onConfirm) {
                 Text("Disconnect", color = AppleRed)
+            }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+        containerColor = MaterialTheme.colorScheme.surface
+    )
+}
+
+@Composable
+fun ForgetConfirmDialog(deviceName: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Forget $deviceName?", style = MaterialTheme.typography.titleMedium) },
+        text = {
+            Text(
+                "This unpairs $deviceName from your phone. You'll need to re-pair them in Bluetooth settings to use them again.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+            )
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = onConfirm) {
+                Text("Forget", color = AppleRed)
             }
         },
         dismissButton = {

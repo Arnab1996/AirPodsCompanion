@@ -274,7 +274,7 @@ class AirPodsService : Service() {
                         _aacpBattery.value = null // Clear stale battery data
                     }
                     a2dpUnlatchRunnable = runnable
-                    handler.postDelayed(runnable, 10_000)
+                    handler.postDelayed(runnable, 6_000)
                 }
             }
         }
@@ -362,6 +362,7 @@ class AirPodsService : Service() {
             _aacpBattery.value,
             ancName,
             _earState.value,
+            codec = _leAudioCapability.value?.displayText ?: "",
             forceByCooldown = true
         )
     }
@@ -517,6 +518,46 @@ class AirPodsService : Service() {
         }
         me.arnabsaha.airpodscompanion.intents.IntentBroadcaster.broadcastDisconnected(this)
     }
+
+    /**
+     * Forget (unpair) the AirPods. Drops the link, then calls the hidden
+     * BluetoothDevice.removeBond() via HiddenApiBypass (same mechanism as the L2CAP socket).
+     * After this the system shows the AirPods as unpaired.
+     */
+    @SuppressLint("MissingPermission")
+    fun forgetDevice() {
+        val device = connectedBtDevice ?: run {
+            val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter
+            val lastAddr = getSharedPreferences("airbridge_settings", MODE_PRIVATE)
+                .getString("last_connected_address", null)
+            adapter?.bondedDevices?.firstOrNull { it.address == lastAddr }
+        }
+        Log.d(TAG, "Forget requested for ${device?.address}")
+        userDisconnected = true
+        _transport.disconnect()
+        if (device != null) {
+            try {
+                HiddenApiBypass.invoke(BluetoothDevice::class.java, device, "removeBond")
+                Log.d(TAG, "removeBond() invoked")
+            } catch (e: Exception) {
+                Log.w(TAG, "removeBond failed: ${e.message}")
+            }
+        }
+        _isBluetoothProfileConnected.value = false
+        _aacpBattery.value = null
+        _deviceInfo.value = null
+        connectedBtDevice = null
+        hasConnectedOnce = false
+        _bondedAirPodsList.value = _bondedAirPodsList.value.filterNot { it.address == device?.address }
+        if (!scanner.isScanning()) {
+            scanner.startScan()
+            startPruneLoop()
+        }
+        me.arnabsaha.airpodscompanion.intents.IntentBroadcaster.broadcastDisconnected(this)
+    }
+
+    /** Send a media key (used by ear-detection and auto-resume). */
+    fun playMedia() = sendMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY)
 
     /** Set noise control mode: OFF, ANC, TRANSPARENCY, ADAPTIVE */
     fun setNoiseControlMode(mode: Byte) {
@@ -730,8 +771,17 @@ class AirPodsService : Service() {
                                 _bondedDeviceName.value ?: "AirPods",
                                 _aacpBattery.value,
                                 ancName,
-                                _earState.value
+                                _earState.value,
+                                codec = _leAudioCapability.value?.displayText ?: ""
                             )
+                            // Auto-resume media if the user enabled it
+                            if (getSharedPreferences("airbridge_settings", MODE_PRIVATE)
+                                    .getBoolean("auto_resume", false)) {
+                                serviceScope.launch {
+                                    kotlinx.coroutines.delay(1500)
+                                    if (_transport.isConnected) sendMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY)
+                                }
+                            }
                         }
                     }
                     AacpTransport.ConnectionState.DISCONNECTED -> {
@@ -921,6 +971,7 @@ class AirPodsService : Service() {
                 syncToWatch()
                 connectionPopup.updateContent(_aacpBattery.value, value, _earState.value)
                 me.arnabsaha.airpodscompanion.intents.IntentBroadcaster.broadcastAncMode(this@AirPodsService, value)
+                flushNotification()  // keep the notification's ANC label in sync
             }
             ControlCommandId.CONVERSATION_AWARENESS -> {
                 val state = if (value == 0x01.toByte()) "ON" else "OFF"

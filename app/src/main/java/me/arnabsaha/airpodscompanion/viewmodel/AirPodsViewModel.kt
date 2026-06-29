@@ -178,6 +178,10 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     /** Battery alert threshold percentage. */
     val batteryAlertThreshold: StateFlow<Int> = _batteryAlertThreshold.asStateFlow()
 
+    private val _autoResume = MutableStateFlow(prefs.getBoolean("auto_resume", false))
+    /** Resume media playback automatically when the AirPods connect. */
+    val autoResume: StateFlow<Boolean> = _autoResume.asStateFlow()
+
     // ── Lifecycle ────────────────────────────────────────────────
 
     /**
@@ -287,6 +291,18 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     fun disconnect() {
         suppressDisconnectError = true
         withService("disconnect") { it.disconnectManually() }
+    }
+
+    /** Forget (unpair) the AirPods entirely. */
+    fun forgetDevice() {
+        suppressDisconnectError = true
+        withService("forgetDevice") { it.forgetDevice() }
+    }
+
+    /** Toggle auto-resume of media playback when the AirPods connect. */
+    fun setAutoResume(enabled: Boolean) {
+        _autoResume.value = enabled
+        saveBool("auto_resume", enabled)
     }
 
     /** Toggle one-bud ANC. */

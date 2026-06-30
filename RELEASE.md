@@ -4,6 +4,11 @@ All notable changes to AirBridge, newest first. Versions map to `v*` git tags, w
 trigger the GitHub Actions release build.
 
 ## Unreleased
+- _Nothing yet._
+
+## v0.2.0 — 2026-06-30
+
+CapOd-inspired functional additions (passive detection) on top of the active feature set.
 
 ### Added
 - Broad device-model detection — 26 AirPods/Beats models identified from the BLE advertisement
@@ -47,5 +52,6 @@ First tagged release — an AirPods Pro companion for Android (phone + Wear OS).
 ### Build
 - GitHub Actions builds the APK and publishes a release on every `v*` tag
 
+[v0.2.0]: https://github.com/Arnab1996/AirPodsCompanion/releases/tag/v0.2.0
 [v0.1.1]: https://github.com/Arnab1996/AirPodsCompanion/releases/tag/v0.1.1
 [v0.1.0]: https://github.com/Arnab1996/AirPodsCompanion/releases/tag/v0.1.0

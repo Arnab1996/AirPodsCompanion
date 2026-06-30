@@ -112,7 +112,7 @@ class AirPodsScanner(context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    fun startScan() {
+    fun startScan(lowPowerOnly: Boolean = false) {
         if (isScanning) {
             Log.d(TAG, "Already scanning")
             return
@@ -130,15 +130,19 @@ class AirPodsScanner(context: Context) {
             return
         }
 
-        // Start with BALANCED for fast initial discovery
-        Log.d(TAG, "Starting BLE scan (BALANCED mode)...")
+        // lowPowerOnly = stay in LOW_POWER (used while connected, to keep battery use minimal).
+        // Otherwise start in BALANCED for fast discovery, then downgrade after 30s.
+        val mode = if (lowPowerOnly) ScanSettings.SCAN_MODE_LOW_POWER else ScanSettings.SCAN_MODE_BALANCED
+        Log.d(TAG, "Starting BLE scan (${if (lowPowerOnly) "LOW_POWER" else "BALANCED"} mode)...")
         try {
-            scanner.startScan(scanFilters, buildScanSettings(ScanSettings.SCAN_MODE_BALANCED), scanCallback)
+            scanner.startScan(scanFilters, buildScanSettings(mode), scanCallback)
             isScanning = true
 
-            // After 30 seconds, downgrade to LOW_POWER to save battery
-            downgradeRunnable = Runnable { downgradeToLowPower() }
-            handler.postDelayed(downgradeRunnable!!, DOWNGRADE_DELAY_MS)
+            if (!lowPowerOnly) {
+                // After 30 seconds, downgrade to LOW_POWER to save battery
+                downgradeRunnable = Runnable { downgradeToLowPower() }
+                handler.postDelayed(downgradeRunnable!!, DOWNGRADE_DELAY_MS)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start scan: ${e.message}")
             isScanning = false

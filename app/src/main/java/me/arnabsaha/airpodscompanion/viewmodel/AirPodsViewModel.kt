@@ -125,6 +125,10 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     /** Latest detected head gesture: (sequence, "nod"|"shake"). Sequence bumps each time. */
     val headGesture: StateFlow<Pair<Long, String>?> = _headGesture.asStateFlow()
 
+    private val _connectionActivity = MutableStateFlow(0)
+    /** Advertisement activity: 0=disconnected, 4=idle, 5=music, 6=call. */
+    val connectionActivity: StateFlow<Int> = _connectionActivity.asStateFlow()
+
     // ── Persisted settings (exposed as StateFlows for the UI) ────
 
     private val prefs: SharedPreferences =
@@ -185,6 +189,10 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     private val _autoResume = MutableStateFlow(prefs.getBoolean("auto_resume", false))
     /** Resume media playback automatically when the AirPods connect. */
     val autoResume: StateFlow<Boolean> = _autoResume.asStateFlow()
+
+    private val _backgroundScan = MutableStateFlow(prefs.getBoolean("background_scan", true))
+    /** Keep a low-power BLE scan while connected (passive case battery + case-open popup). */
+    val backgroundScan: StateFlow<Boolean> = _backgroundScan.asStateFlow()
 
     // ── Lifecycle ────────────────────────────────────────────────
 
@@ -307,6 +315,13 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     fun setAutoResume(enabled: Boolean) {
         _autoResume.value = enabled
         saveBool("auto_resume", enabled)
+    }
+
+    /** Toggle the low-power background scan kept alive while connected. Applies immediately. */
+    fun setBackgroundScan(enabled: Boolean) {
+        _backgroundScan.value = enabled
+        saveBool("background_scan", enabled)
+        withService("setBackgroundScan") { it.applyBackgroundScan() }
     }
 
     /** Toggle one-bud ANC. */
@@ -442,6 +457,9 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
         }
         viewModelScope.launch {
             service.headGesture.collect { _headGesture.value = it }
+        }
+        viewModelScope.launch {
+            service.connectionActivity.collect { _connectionActivity.value = it }
         }
     }
 

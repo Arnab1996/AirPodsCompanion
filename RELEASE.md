@@ -8,6 +8,9 @@ trigger the GitHub Actions release build.
 ### Added
 - Broad device-model detection — 26 AirPods/Beats models identified from the BLE advertisement
 - Nearby devices + passive battery in the picker (model, L/R/case battery, signal — no connection needed)
+- Passive case battery and a case-open popup while connected, via an optional low-power background scan
+- Connection activity (Playing / On a call) in the dashboard header and nearby cards
+- "Background Battery Updates" setting to control the connected-state scan
 
 ### Changed
 - README rewritten with the current feature set and supported-models list

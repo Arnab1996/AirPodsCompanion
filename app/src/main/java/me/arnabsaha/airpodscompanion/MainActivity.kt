@@ -274,6 +274,8 @@ fun DashboardScreen(vm: AirPodsViewModel) {
     val deviceInfo by vm.deviceInfo.collectAsState()
     val autoResume by vm.autoResume.collectAsState()
     val nearestDevice by vm.nearestAirPods.collectAsState()
+    val backgroundScan by vm.backgroundScan.collectAsState()
+    val connectionActivity by vm.connectionActivity.collectAsState()
 
     val hazeState = rememberGlassState()
     Box(modifier = Modifier.fillMaxSize()) {
@@ -299,10 +301,15 @@ fun DashboardScreen(vm: AirPodsViewModel) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val isLive = connState == AacpTransport.ConnectionState.CONNECTED
                     val statusColor = if (isLive) AppleGreen else AppleOrange
+                    val activity = when (connectionActivity) {
+                        5 -> " · Playing"
+                        6 -> " · On a call"
+                        else -> ""
+                    }
                     Box(Modifier.size(8.dp).clip(CircleShape).background(statusColor))
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        if (isLive) "Connected" else "Reconnecting…",
+                        if (isLive) "Connected$activity" else "Reconnecting…",
                         style = MaterialTheme.typography.bodySmall,
                         color = statusColor
                     )
@@ -406,6 +413,10 @@ fun DashboardScreen(vm: AirPodsViewModel) {
             Divider()
             SettingToggle("Resume Music on Connect", "Start playback automatically when your AirPods connect",
                 enabled = autoResume, onToggle = { vm.setAutoResume(it) })
+            Divider()
+            SettingToggle("Background Battery Updates",
+                "Keep a low-power scan while connected for case battery and case-open alerts",
+                enabled = backgroundScan, onToggle = { vm.setBackgroundScan(it) })
         }
 
         Spacer(Modifier.height(20.dp))
@@ -1367,6 +1378,10 @@ fun NearbyDeviceCard(dev: me.arnabsaha.airpodscompanion.ble.scanner.AirPodsAdver
                 Text(dev.modelName, style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
                 val parts = buildList {
+                    when (dev.connectionState) {
+                        5 -> add("Playing")
+                        6 -> add("On a call")
+                    }
                     if (dev.leftBattery >= 0) add("L ${dev.leftBattery}%")
                     if (dev.rightBattery >= 0) add("R ${dev.rightBattery}%")
                     if (dev.caseBattery >= 0) add("Case ${dev.caseBattery}%")

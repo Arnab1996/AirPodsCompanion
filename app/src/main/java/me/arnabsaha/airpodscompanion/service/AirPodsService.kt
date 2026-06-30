@@ -146,6 +146,11 @@ class AirPodsService : Service() {
     val headGesture: StateFlow<Pair<Long, String>?> = _headGesture.asStateFlow()
     private var headGestureSeq = 0L
 
+    // Connection activity from the BLE advertisement: 0=disconnected, 4=idle, 5=music, 6=call
+    private val _connectionActivity = MutableStateFlow(0)
+    val connectionActivity: StateFlow<Int> = _connectionActivity.asStateFlow()
+    private var lastLidOpen = false
+
     // List of all bonded AirPods devices
     private val _bondedAirPodsList = MutableStateFlow<List<BondedAirPods>>(emptyList())
     val bondedAirPodsList: StateFlow<List<BondedAirPods>> = _bondedAirPodsList.asStateFlow()
@@ -319,6 +324,7 @@ class AirPodsService : Service() {
         scanner.startScan()
         startPruneLoop()
         observeConnectionState()
+        observePassiveAdvertisements()
         startPacketDispatcher()
         setupWearSync()
 
@@ -739,9 +745,7 @@ class AirPodsService : Service() {
             _transport.connectionState.collect { state ->
                 when (state) {
                     AacpTransport.ConnectionState.CONNECTED -> {
-                        scanner.stopScan()
-                        stopPruneLoop()
-                        Log.d(TAG, "Stopped BLE scan + prune loop (connected)")
+                        applyBackgroundScan()
                         me.arnabsaha.airpodscompanion.intents.IntentBroadcaster.broadcastConnected(
                             this@AirPodsService, _bondedDeviceName.value ?: "AirPods"
                         )
@@ -811,6 +815,68 @@ class AirPodsService : Service() {
                     updateNotificationImmediate("Searching for AirPods…")
                 }
             }
+        }
+    }
+
+    /** Observe BLE advertisements for passive battery, case-open popups, and activity. */
+    private fun observePassiveAdvertisements() {
+        serviceScope.launch {
+            scanner.nearestAirPods.collect { ad ->
+                if (ad == null) return@collect
+
+                // Connection activity (idle / music / call) from the advertisement
+                _connectionActivity.value = ad.connectionState
+
+                // Passive case battery: fill the gauge from the advertisement when AACP lacks it
+                if (_transport.isConnected) {
+                    val current = _aacpBattery.value
+                    if (current != null && current.caseLevel < 0 && ad.caseBattery >= 0) {
+                        _aacpBattery.value = current.copy(
+                            caseLevel = ad.caseBattery,
+                            caseCharging = ad.isCaseCharging
+                        )
+                    }
+                }
+
+                // Case-open: pop the island when the lid opens (the popup's cooldown prevents spam)
+                if (ad.isLidOpen && !lastLidOpen) showCaseOpenPopup(ad)
+                lastLidOpen = ad.isLidOpen
+            }
+        }
+    }
+
+    private fun showCaseOpenPopup(ad: AirPodsAdvertisement) {
+        if (!android.provider.Settings.canDrawOverlays(this)) return
+        if (_transport.isConnected) {
+            showPopupIfConnected()
+        } else {
+            val batt = AacpBatteryState(
+                leftLevel = ad.leftBattery, leftCharging = ad.isLeftCharging,
+                rightLevel = ad.rightBattery, rightCharging = ad.isRightCharging,
+                caseLevel = ad.caseBattery, caseCharging = ad.isCaseCharging
+            )
+            connectionPopup.show(ad.modelName, batt, "—", EarState(), codec = "")
+        }
+    }
+
+    private fun isBackgroundScanEnabled(): Boolean =
+        getSharedPreferences("airbridge_settings", MODE_PRIVATE).getBoolean("background_scan", true)
+
+    /**
+     * While connected: keep a low-power scan running (passive case battery, lid-open popup,
+     * activity) when enabled; otherwise stop scanning to save power. Safe to call anytime.
+     */
+    fun applyBackgroundScan() {
+        if (!_transport.isConnected) return
+        if (isBackgroundScanEnabled()) {
+            scanner.stopScan()
+            scanner.startScan(lowPowerOnly = true)
+            if (pruneRunnable == null) startPruneLoop()
+            Log.d(TAG, "Connected — low-power background scan on")
+        } else {
+            scanner.stopScan()
+            stopPruneLoop()
+            Log.d(TAG, "Connected — background scan off")
         }
     }
 

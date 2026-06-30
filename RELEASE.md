@@ -12,6 +12,9 @@ trigger the GitHub Actions release build.
 - Find My screen and the confirm/rename dialogs compacted
 - Overlay permission screen explains the Android 13+ "Allow restricted settings" step for sideloaded builds
 
+### Changed
+- README expanded — badges, full supported-model list, download table, protocol/opcode details, project layout, and credits
+
 ## v0.2.0 — 2026-06-30
 
 CapOd-inspired functional additions (passive detection) on top of the active feature set.

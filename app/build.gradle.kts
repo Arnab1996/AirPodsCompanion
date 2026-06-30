@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -20,13 +22,15 @@ android {
         create("release") {
             // Local builds read keystore.properties (gitignored); CI reads KEYSTORE_* env vars.
             val propsFile = rootProject.file("keystore.properties")
+            val envStore = System.getenv("KEYSTORE_FILE")
             if (propsFile.exists()) {
-                val props = java.util.Properties().apply { propsFile.inputStream().use { load(it) } }
+                val props = Properties()
+                propsFile.inputStream().use { props.load(it) }
                 storeFile = file(props.getProperty("storeFile"))
                 storePassword = props.getProperty("storePassword")
                 keyAlias = props.getProperty("keyAlias")
                 keyPassword = props.getProperty("keyPassword")
-            } else System.getenv("KEYSTORE_FILE")?.let { envStore ->
+            } else if (envStore != null) {
                 storeFile = file(envStore)
                 storePassword = System.getenv("KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("KEY_ALIAS")

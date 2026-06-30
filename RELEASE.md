@@ -4,7 +4,13 @@ All notable changes to AirBridge, newest first. Versions map to `v*` git tags, w
 trigger the GitHub Actions release build.
 
 ## Unreleased
-- _Nothing yet._
+
+### Added
+- Broad device-model detection — 26 AirPods/Beats models identified from the BLE advertisement
+- Nearby devices + passive battery in the picker (model, L/R/case battery, signal — no connection needed)
+
+### Changed
+- README rewritten with the current feature set and supported-models list
 
 ## v0.1.1 — 2026-06-30
 

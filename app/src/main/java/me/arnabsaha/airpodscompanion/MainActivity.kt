@@ -704,7 +704,7 @@ fun StemActionDialog(current: String, onDismiss: () -> Unit, onSelect: (String) 
 fun DisconnectConfirmDialog(deviceName: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Disconnect?", style = MaterialTheme.typography.titleLarge) },
+        title = { Text("Disconnect?", style = MaterialTheme.typography.titleMedium) },
         text = {
             Text(
                 "AirBridge will stop managing $deviceName until you reconnect. Audio playback is unaffected.",
@@ -995,7 +995,7 @@ fun RenameDialog(currentName: String, onDismiss: () -> Unit, onRename: (String) 
     var name by remember { mutableStateOf(currentName) }
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Rename AirPods", style = MaterialTheme.typography.titleLarge) },
+        title = { Text("Rename AirPods", style = MaterialTheme.typography.titleMedium) },
         text = {
             androidx.compose.material3.OutlinedTextField(
                 value = name,
@@ -1535,6 +1535,15 @@ fun PermissionsScreen(perms: com.google.accompanist.permissions.MultiplePermissi
             shape = RoundedCornerShape(12.dp)) {
             Text(if (canDrawOverlays) "Overlay Granted" else "Grant Overlay",
                 style = MaterialTheme.typography.labelLarge, color = Color.White)
+        }
+        if (!canDrawOverlays) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "If the overlay toggle is greyed out (sideloaded build), open App info → ⋮ → Allow restricted settings first.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+                textAlign = TextAlign.Center
+            )
         }
         Spacer(Modifier.height(40.dp))
     }

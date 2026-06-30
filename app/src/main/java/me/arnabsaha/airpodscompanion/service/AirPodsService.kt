@@ -406,8 +406,16 @@ class AirPodsService : Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        Log.d(TAG, "Task removed — service continues running")
-        // Safety net: schedule restart in case OEM battery optimization kills us
+        if (!_transport.isConnected) {
+            // Idle when the user swiped the app away → fully stop so AirBridge leaves "Active apps".
+            Log.d(TAG, "Task removed while idle — stopping service")
+            stopForeground(Service.STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            super.onTaskRemoved(rootIntent)
+            return
+        }
+        // Connected — keep managing the AirPods. Schedule a restart in case an OEM kills us.
+        Log.d(TAG, "Task removed while connected — service continues running")
         val restartIntent = Intent(applicationContext, AirPodsService::class.java)
         val pendingIntent = PendingIntent.getService(
             applicationContext, 0, restartIntent,

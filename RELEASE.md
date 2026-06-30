@@ -4,7 +4,13 @@ All notable changes to AirBridge, newest first. Versions map to `v*` git tags, w
 trigger the GitHub Actions release build.
 
 ## Unreleased
-- _Nothing yet._
+
+### Fixed
+- Head shake ("no") is more sensitive — an ordinary shake registers, not just a vigorous one
+- AirBridge stops (leaves "Active apps") when you swipe it away while not connected
+- Dynamic Island dismiss no longer jumps back down after a swipe — smoother
+- Find My screen and the confirm/rename dialogs compacted
+- Overlay permission screen explains the Android 13+ "Allow restricted settings" step for sideloaded builds
 
 ## v0.2.0 — 2026-06-30
 

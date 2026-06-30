@@ -273,6 +273,7 @@ fun DashboardScreen(vm: AirPodsViewModel) {
     val allowOff by vm.allowOff.collectAsState()
     val deviceInfo by vm.deviceInfo.collectAsState()
     val autoResume by vm.autoResume.collectAsState()
+    val nearestDevice by vm.nearestAirPods.collectAsState()
 
     val hazeState = rememberGlassState()
     Box(modifier = Modifier.fillMaxSize()) {
@@ -523,7 +524,10 @@ fun DashboardScreen(vm: AirPodsViewModel) {
                     onRename = { vm.renameAirPods(it); showRenameDialog = false })
             }
             Divider()
-            SettingInfo("Model", deviceInfo?.modelNumber?.ifBlank { null } ?: "—", dense = true)
+            SettingInfo("Model",
+                nearestDevice?.modelName?.takeIf { it.isNotBlank() && !it.startsWith("Unknown") }
+                    ?: deviceInfo?.modelNumber?.ifBlank { null } ?: "—",
+                dense = true)
             Divider()
             SettingInfo("Firmware", deviceInfo?.firmwareVersion?.ifBlank { null } ?: "—", dense = true)
             Divider()

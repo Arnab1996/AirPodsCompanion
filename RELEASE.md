@@ -1,0 +1,42 @@
+# Release Notes
+
+All notable changes to AirBridge, newest first. Versions map to `v*` git tags, which
+trigger the GitHub Actions release build.
+
+## Unreleased
+- _Nothing yet._
+
+## v0.1.1 — 2026-06-30
+
+First properly **signed** release (release keystore). No functional changes from 0.1.0 — the v0.1.0 APK was debug-signed.
+
+> Upgrading from v0.1.0: uninstall it first (the debug and release signing keys differ, so it won't update in place). Updates from 0.1.1 onward install over the top.
+
+## v0.1.0 — 2026-06-29
+
+First tagged release — an AirPods Pro companion for Android (phone + Wear OS).
+
+### Added
+- Liquid-glass dashboard with neumorphic battery gauges and a segmented ANC control
+- Wear OS dashboard restyle (gradient + glass; no real-time blur, to save battery)
+- Dynamic Island popup — battery, ANC, ear state, charging ⚡, codec badge; springy entry and auto-dismiss
+- Find My AirPods (RSSI proximity), low-battery alerts, Glance home/lock widget, Wear tiles + complication
+- Forget This Device (true unpair via `removeBond`) behind a confirm dialog
+- Opt-in "Resume Music on Connect"
+- Bluetooth-off screen instead of a misleading "pair first" prompt
+
+### Changed
+- One self-syncing foreground notification (was two); drops out of "Active apps" when Bluetooth is off
+- Dashboard holds through brief reconnects and reverts to the picker once both buds are cased
+- Device info parsed by content, so the real model number shows
+
+### Fixed
+- Audio instability caused by a post-connect settings burst (reverted)
+- Head-shake gesture detection thresholds
+- Stale "ANC: Off" label on the notification
+
+### Build
+- GitHub Actions builds the APK and publishes a release on every `v*` tag
+
+[v0.1.1]: https://github.com/Arnab1996/AirPodsCompanion/releases/tag/v0.1.1
+[v0.1.0]: https://github.com/Arnab1996/AirPodsCompanion/releases/tag/v0.1.0

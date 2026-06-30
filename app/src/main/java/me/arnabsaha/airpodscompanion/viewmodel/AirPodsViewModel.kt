@@ -113,6 +113,10 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     /** Nearest AirPods by RSSI (for Find My feature). */
     val nearestAirPods: StateFlow<me.arnabsaha.airpodscompanion.ble.scanner.AirPodsAdvertisement?> = _nearestAirPods.asStateFlow()
 
+    private val _nearbyDevices = MutableStateFlow<List<me.arnabsaha.airpodscompanion.ble.scanner.AirPodsAdvertisement>>(emptyList())
+    /** All AirPods/Beats currently seen over BLE (passive — no connection needed), strongest signal first. */
+    val nearbyDevices: StateFlow<List<me.arnabsaha.airpodscompanion.ble.scanner.AirPodsAdvertisement>> = _nearbyDevices.asStateFlow()
+
     private val _deviceInfo = MutableStateFlow<me.arnabsaha.airpodscompanion.service.DeviceInfo?>(null)
     /** Real device info (model / serial / firmware) parsed from AACP opcode 0x1D. */
     val deviceInfo: StateFlow<me.arnabsaha.airpodscompanion.service.DeviceInfo?> = _deviceInfo.asStateFlow()
@@ -427,6 +431,11 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
         }
         viewModelScope.launch {
             service.nearestAirPods.collect { _nearestAirPods.value = it }
+        }
+        viewModelScope.launch {
+            service.detectedDevices.collect { map ->
+                _nearbyDevices.value = map.values.sortedByDescending { it.rssi }
+            }
         }
         viewModelScope.launch {
             service.deviceInfo.collect { _deviceInfo.value = it }

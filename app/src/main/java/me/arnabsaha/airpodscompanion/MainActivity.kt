@@ -1193,6 +1193,7 @@ fun DevicePickerScreen(vm: AirPodsViewModel) {
     val bondedDevices by vm.bondedAirPodsList.collectAsState()
     val deviceName by vm.bondedDeviceName.collectAsState()
     val error by vm.connectionError.collectAsState()
+    val nearbyDevices by vm.nearbyDevices.collectAsState()
 
     LaunchedEffect(error) {
         if (error != null) { kotlinx.coroutines.delay(4000); vm.clearConnectionError() }
@@ -1295,6 +1296,17 @@ fun DevicePickerScreen(vm: AirPodsViewModel) {
                 Spacer(Modifier.height(10.dp))
             }
 
+            // Nearby AirPods/Beats seen over BLE — passive, no connection needed (CapOd-style)
+            if (nearbyDevices.isNotEmpty()) {
+                Text("Nearby", style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+                    modifier = Modifier.padding(top = 8.dp, bottom = 10.dp))
+                nearbyDevices.take(4).forEach { dev ->
+                    NearbyDeviceCard(dev)
+                    Spacer(Modifier.height(8.dp))
+                }
+            }
+
             Spacer(Modifier.weight(1f))
 
             // Error message
@@ -1332,6 +1344,42 @@ fun StatusChip(text: String, color: Color) {
     ) {
         Text(text, style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Medium, color = color)
+    }
+}
+
+@Composable
+fun NearbyDeviceCard(dev: me.arnabsaha.airpodscompanion.ble.scanner.AirPodsAdvertisement) {
+    SectionCard {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.HeadsetMic, null, Modifier.size(22.dp),
+                    tint = MaterialTheme.colorScheme.primary)
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(dev.modelName, style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+                val parts = buildList {
+                    if (dev.leftBattery >= 0) add("L ${dev.leftBattery}%")
+                    if (dev.rightBattery >= 0) add("R ${dev.rightBattery}%")
+                    if (dev.caseBattery >= 0) add("Case ${dev.caseBattery}%")
+                }
+                Text(
+                    if (parts.isEmpty()) "No battery yet" else parts.joinToString("   "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                )
+            }
+            Text("${dev.rssi} dBm", style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f))
+        }
     }
 }
 

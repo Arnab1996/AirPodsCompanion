@@ -6,6 +6,20 @@ trigger the GitHub Actions release build.
 ## Unreleased
 - _Nothing yet._
 
+## v0.2.0 — 2026-06-30
+
+CapOd-inspired functional additions (passive detection) on top of the active feature set.
+
+### Added
+- Broad device-model detection — 26 AirPods/Beats models identified from the BLE advertisement
+- Nearby devices + passive battery in the picker (model, L/R/case battery, signal — no connection needed)
+- Passive case battery and a case-open popup while connected, via an optional low-power background scan
+- Connection activity (Playing / On a call) in the dashboard header and nearby cards
+- "Background Battery Updates" setting to control the connected-state scan
+
+### Changed
+- README rewritten with the current feature set and supported-models list
+
 ## v0.1.1 — 2026-06-30
 
 First properly **signed** release (release keystore). No functional changes from 0.1.0 — the v0.1.0 APK was debug-signed.
@@ -38,5 +52,6 @@ First tagged release — an AirPods Pro companion for Android (phone + Wear OS).
 ### Build
 - GitHub Actions builds the APK and publishes a release on every `v*` tag
 
+[v0.2.0]: https://github.com/Arnab1996/AirPodsCompanion/releases/tag/v0.2.0
 [v0.1.1]: https://github.com/Arnab1996/AirPodsCompanion/releases/tag/v0.1.1
 [v0.1.0]: https://github.com/Arnab1996/AirPodsCompanion/releases/tag/v0.1.0

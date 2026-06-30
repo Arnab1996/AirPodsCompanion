@@ -23,8 +23,9 @@ object AppleBleConstants {
     const val NEARBY_TYPE: Byte = 0x07
     const val NEARBY_LENGTH: Byte = 0x19  // 25
 
-    // Device Model IDs (big-endian in the advertisement)
+    // Device Model IDs (big-endian in the advertisement). Verified against CapOd's model set.
     object DeviceModel {
+        // ── AirPods ──
         const val AIRPODS_1: Short = 0x0220
         const val AIRPODS_2: Short = 0x0F20
         const val AIRPODS_3: Short = 0x1320
@@ -33,8 +34,26 @@ object AppleBleConstants {
         const val AIRPODS_PRO: Short = 0x0E20
         const val AIRPODS_PRO_2: Short = 0x1420
         const val AIRPODS_PRO_2_USB_C: Short = 0x2420
+        const val AIRPODS_PRO_3: Short = 0x2720
         const val AIRPODS_MAX: Short = 0x0A20
         const val AIRPODS_MAX_USB_C: Short = 0x1F20
+        const val AIRPODS_MAX_2: Short = 0x2D20
+
+        // ── Beats ──
+        const val POWERBEATS_3: Short = 0x0320
+        const val POWERBEATS_4: Short = 0x0D20
+        const val POWERBEATS_PRO: Short = 0x0B20
+        const val POWERBEATS_PRO_2: Short = 0x1D20
+        const val BEATS_X: Short = 0x0520
+        const val BEATS_SOLO_3: Short = 0x0620
+        const val BEATS_SOLO_4: Short = 0x2520
+        const val BEATS_SOLO_PRO: Short = 0x0C20
+        const val BEATS_SOLO_BUDS: Short = 0x2620
+        const val BEATS_STUDIO_BUDS: Short = 0x1120
+        const val BEATS_STUDIO_BUDS_PLUS: Short = 0x1620
+        const val BEATS_STUDIO_PRO: Short = 0x1720
+        const val BEATS_FLEX: Short = 0x1020
+        const val BEATS_FIT_PRO: Short = 0x1220
 
         fun nameFor(model: Short): String = when (model) {
             AIRPODS_1 -> "AirPods (1st gen)"
@@ -45,8 +64,24 @@ object AppleBleConstants {
             AIRPODS_PRO -> "AirPods Pro"
             AIRPODS_PRO_2 -> "AirPods Pro 2"
             AIRPODS_PRO_2_USB_C -> "AirPods Pro 2 (USB-C)"
+            AIRPODS_PRO_3 -> "AirPods Pro 3"
             AIRPODS_MAX -> "AirPods Max"
             AIRPODS_MAX_USB_C -> "AirPods Max (USB-C)"
+            AIRPODS_MAX_2 -> "AirPods Max (2nd gen)"
+            POWERBEATS_3 -> "Powerbeats 3"
+            POWERBEATS_4 -> "Powerbeats 4"
+            POWERBEATS_PRO -> "Powerbeats Pro"
+            POWERBEATS_PRO_2 -> "Powerbeats Pro 2"
+            BEATS_X -> "Beats X"
+            BEATS_SOLO_3 -> "Beats Solo 3"
+            BEATS_SOLO_4 -> "Beats Solo 4"
+            BEATS_SOLO_PRO -> "Beats Solo Pro"
+            BEATS_SOLO_BUDS -> "Beats Solo Buds"
+            BEATS_STUDIO_BUDS -> "Beats Studio Buds"
+            BEATS_STUDIO_BUDS_PLUS -> "Beats Studio Buds+"
+            BEATS_STUDIO_PRO -> "Beats Studio Pro"
+            BEATS_FLEX -> "Beats Flex"
+            BEATS_FIT_PRO -> "Beats Fit Pro"
             else -> "Unknown AirPods (0x${"%04X".format(model)})"
         }
 

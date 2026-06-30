@@ -113,6 +113,10 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     /** Nearest AirPods by RSSI (for Find My feature). */
     val nearestAirPods: StateFlow<me.arnabsaha.airpodscompanion.ble.scanner.AirPodsAdvertisement?> = _nearestAirPods.asStateFlow()
 
+    private val _nearbyDevices = MutableStateFlow<List<me.arnabsaha.airpodscompanion.ble.scanner.AirPodsAdvertisement>>(emptyList())
+    /** All AirPods/Beats currently seen over BLE (passive — no connection needed), strongest signal first. */
+    val nearbyDevices: StateFlow<List<me.arnabsaha.airpodscompanion.ble.scanner.AirPodsAdvertisement>> = _nearbyDevices.asStateFlow()
+
     private val _deviceInfo = MutableStateFlow<me.arnabsaha.airpodscompanion.service.DeviceInfo?>(null)
     /** Real device info (model / serial / firmware) parsed from AACP opcode 0x1D. */
     val deviceInfo: StateFlow<me.arnabsaha.airpodscompanion.service.DeviceInfo?> = _deviceInfo.asStateFlow()
@@ -120,6 +124,10 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     private val _headGesture = MutableStateFlow<Pair<Long, String>?>(null)
     /** Latest detected head gesture: (sequence, "nod"|"shake"). Sequence bumps each time. */
     val headGesture: StateFlow<Pair<Long, String>?> = _headGesture.asStateFlow()
+
+    private val _connectionActivity = MutableStateFlow(0)
+    /** Advertisement activity: 0=disconnected, 4=idle, 5=music, 6=call. */
+    val connectionActivity: StateFlow<Int> = _connectionActivity.asStateFlow()
 
     // ── Persisted settings (exposed as StateFlows for the UI) ────
 
@@ -181,6 +189,10 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     private val _autoResume = MutableStateFlow(prefs.getBoolean("auto_resume", false))
     /** Resume media playback automatically when the AirPods connect. */
     val autoResume: StateFlow<Boolean> = _autoResume.asStateFlow()
+
+    private val _backgroundScan = MutableStateFlow(prefs.getBoolean("background_scan", true))
+    /** Keep a low-power BLE scan while connected (passive case battery + case-open popup). */
+    val backgroundScan: StateFlow<Boolean> = _backgroundScan.asStateFlow()
 
     // ── Lifecycle ────────────────────────────────────────────────
 
@@ -303,6 +315,13 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     fun setAutoResume(enabled: Boolean) {
         _autoResume.value = enabled
         saveBool("auto_resume", enabled)
+    }
+
+    /** Toggle the low-power background scan kept alive while connected. Applies immediately. */
+    fun setBackgroundScan(enabled: Boolean) {
+        _backgroundScan.value = enabled
+        saveBool("background_scan", enabled)
+        withService("setBackgroundScan") { it.applyBackgroundScan() }
     }
 
     /** Toggle one-bud ANC. */
@@ -429,10 +448,18 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
             service.nearestAirPods.collect { _nearestAirPods.value = it }
         }
         viewModelScope.launch {
+            service.detectedDevices.collect { map ->
+                _nearbyDevices.value = map.values.sortedByDescending { it.rssi }
+            }
+        }
+        viewModelScope.launch {
             service.deviceInfo.collect { _deviceInfo.value = it }
         }
         viewModelScope.launch {
             service.headGesture.collect { _headGesture.value = it }
+        }
+        viewModelScope.launch {
+            service.connectionActivity.collect { _connectionActivity.value = it }
         }
     }
 

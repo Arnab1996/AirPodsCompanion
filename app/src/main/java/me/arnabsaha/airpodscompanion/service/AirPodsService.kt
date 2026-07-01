@@ -150,6 +150,7 @@ class AirPodsService : Service() {
     private val _connectionActivity = MutableStateFlow(0)
     val connectionActivity: StateFlow<Int> = _connectionActivity.asStateFlow()
     private var lastLidOpen = false
+    private var lastWidgetKey: Triple<Int, Int, Int>? = null
 
     // List of all bonded AirPods devices
     private val _bondedAirPodsList = MutableStateFlow<List<BondedAirPods>>(emptyList())
@@ -842,6 +843,15 @@ class AirPodsService : Service() {
                         _aacpBattery.value = current.copy(
                             caseLevel = ad.caseBattery,
                             caseCharging = ad.isCaseCharging
+                        )
+                    }
+                } else {
+                    // Not connected — keep the home-screen widget fresh from the advertisement
+                    val key = Triple(ad.leftBattery, ad.rightBattery, ad.caseBattery)
+                    if (key != lastWidgetKey) {
+                        lastWidgetKey = key
+                        me.arnabsaha.airpodscompanion.widgets.BatteryWidget.sendUpdate(
+                            this@AirPodsService, ad.leftBattery, ad.rightBattery, ad.caseBattery
                         )
                     }
                 }

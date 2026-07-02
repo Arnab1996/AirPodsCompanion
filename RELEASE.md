@@ -6,6 +6,14 @@ trigger the GitHub Actions release build.
 ## Unreleased
 - _Nothing yet._
 
+## v0.2.3 — 2026-07-02
+
+### Fixed
+- Battery widget shows the current L/R/case levels the moment it's added — no more dashes until the next battery change. It now renders from the last-known levels.
+
+### Added
+- "Run in Background" setting (on by default). Turn it off to fully stop AirBridge when you swipe it away: it leaves "Active apps", at the cost of background battery, ANC, ear detection and popups until you reopen it.
+
 ## v0.2.2 — 2026-07-02
 
 ### Changed
@@ -75,6 +83,7 @@ First tagged release — an AirPods Pro companion for Android (phone + Wear OS).
 ### Build
 - GitHub Actions builds the APK and publishes a release on every `v*` tag
 
+[v0.2.3]: https://github.com/Arnab1996/AirPodsCompanion/releases/tag/v0.2.3
 [v0.2.2]: https://github.com/Arnab1996/AirPodsCompanion/releases/tag/v0.2.2
 [v0.2.1]: https://github.com/Arnab1996/AirPodsCompanion/releases/tag/v0.2.1
 [v0.2.0]: https://github.com/Arnab1996/AirPodsCompanion/releases/tag/v0.2.0

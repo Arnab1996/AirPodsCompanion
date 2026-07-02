@@ -194,6 +194,10 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     /** Keep a low-power BLE scan while connected (passive case battery + case-open popup). */
     val backgroundScan: StateFlow<Boolean> = _backgroundScan.asStateFlow()
 
+    private val _runInBackground = MutableStateFlow(prefs.getBoolean("run_in_background", true))
+    /** Keep the service alive after the app is swiped away (background features vs. Active-apps entry). */
+    val runInBackground: StateFlow<Boolean> = _runInBackground.asStateFlow()
+
     // ── Lifecycle ────────────────────────────────────────────────
 
     /**
@@ -322,6 +326,16 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
         _backgroundScan.value = enabled
         saveBool("background_scan", enabled)
         withService("setBackgroundScan") { it.applyBackgroundScan() }
+    }
+
+    /**
+     * Toggle whether AirBridge keeps running after the app is swiped away. When off, the service
+     * fully stops on swipe (leaves "Active apps") but background features pause until reopened.
+     * Read by the service in onTaskRemoved — no live call needed.
+     */
+    fun setRunInBackground(enabled: Boolean) {
+        _runInBackground.value = enabled
+        saveBool("run_in_background", enabled)
     }
 
     /** Toggle one-bud ANC. */

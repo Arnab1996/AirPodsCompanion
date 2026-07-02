@@ -275,6 +275,7 @@ fun DashboardScreen(vm: AirPodsViewModel) {
     val autoResume by vm.autoResume.collectAsState()
     val nearestDevice by vm.nearestAirPods.collectAsState()
     val backgroundScan by vm.backgroundScan.collectAsState()
+    val runInBackground by vm.runInBackground.collectAsState()
     val connectionActivity by vm.connectionActivity.collectAsState()
 
     val hazeState = rememberGlassState()
@@ -417,6 +418,10 @@ fun DashboardScreen(vm: AirPodsViewModel) {
             SettingToggle("Background Battery Updates",
                 "Keep a low-power scan while connected for case battery and case-open alerts",
                 enabled = backgroundScan, onToggle = { vm.setBackgroundScan(it) })
+            Divider()
+            SettingToggle("Run in Background",
+                "Keep battery, ANC, ear detection and popups working when AirBridge is closed. Turn off to fully stop when you swipe the app away (leaves \"Active apps\").",
+                enabled = runInBackground, onToggle = { vm.setRunInBackground(it) })
         }
 
         Spacer(Modifier.height(12.dp))

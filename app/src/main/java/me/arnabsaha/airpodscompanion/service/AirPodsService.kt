@@ -407,9 +407,12 @@ class AirPodsService : Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        if (!_transport.isConnected) {
-            // Idle when the user swiped the app away → fully stop so AirBridge leaves "Active apps".
-            Log.d(TAG, "Task removed while idle — stopping service")
+        val runInBackground = getSharedPreferences("airbridge_settings", MODE_PRIVATE)
+            .getBoolean("run_in_background", true)
+        if (!_transport.isConnected || !runInBackground) {
+            // Idle, or the user opted out of background running → fully stop so AirBridge
+            // leaves "Active apps".
+            Log.d(TAG, "Task removed (connected=${_transport.isConnected}, bg=$runInBackground) — stopping service")
             stopForeground(Service.STOP_FOREGROUND_REMOVE)
             stopSelf()
             super.onTaskRemoved(rootIntent)

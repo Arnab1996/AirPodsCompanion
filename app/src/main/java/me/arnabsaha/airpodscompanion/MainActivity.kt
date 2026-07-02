@@ -339,14 +339,14 @@ fun DashboardScreen(vm: AirPodsViewModel) {
             }
         }
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(12.dp))
 
         // Noise Control — segmented with icons
         SectionHeader("Noise Control")
 
         AncSegmentedControl(currentMode = ancMode, onModeChange = { vm.setNoiseControlMode(it) })
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(12.dp))
 
         // ═══ Find My + Codec + Battery Alerts (key utilities, kept near the top) ═══
         StatusUtilityCard(
@@ -356,7 +356,7 @@ fun DashboardScreen(vm: AirPodsViewModel) {
             onThresholdChange = { vm.setBatteryAlertThreshold(it) }
         )
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(12.dp))
 
         // ═══ Audio Section (macOS-inspired flat rows) ═══
         SectionHeader("Audio")
@@ -419,7 +419,7 @@ fun DashboardScreen(vm: AirPodsViewModel) {
                 enabled = backgroundScan, onToggle = { vm.setBackgroundScan(it) })
         }
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(12.dp))
 
         // ═══ Head Gestures Section ═══
         SectionHeader("Head Gestures")
@@ -475,7 +475,7 @@ fun DashboardScreen(vm: AirPodsViewModel) {
             SettingInfo("Decline, Dismiss", "Side to Side")
         }
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(12.dp))
 
         // ═══ Case & Stem Section ═══
         SectionCard {
@@ -514,7 +514,7 @@ fun DashboardScreen(vm: AirPodsViewModel) {
             }
         }
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(12.dp))
 
         // ═══ Device Section ═══
         SectionCard {
@@ -671,11 +671,15 @@ private fun StatusUtilityCard(
 @Composable
 fun StemActionDialog(current: String, onDismiss: () -> Unit, onSelect: (String) -> Unit) {
     val options = listOf("Noise Control", "Voice Assistant")
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Press and Hold", style = MaterialTheme.typography.titleMedium) },
-        text = {
-            Column {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = RoundedCornerShape(Radius.card),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Press and Hold", style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.height(6.dp))
                 options.forEach { option ->
                     Row(
                         modifier = Modifier.fillMaxWidth()
@@ -684,20 +688,14 @@ fun StemActionDialog(current: String, onDismiss: () -> Unit, onSelect: (String) 
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(selected = current == option, onClick = { onSelect(option) })
-                        Spacer(Modifier.width(6.dp))
+                        Spacer(Modifier.width(8.dp))
                         Text(option, style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface)
                     }
                 }
             }
-        },
-        confirmButton = {
-            androidx.compose.material3.TextButton(onClick = onDismiss) {
-                Text("Done", color = MaterialTheme.colorScheme.primary)
-            }
-        },
-        containerColor = MaterialTheme.colorScheme.surface
-    )
+        }
+    }
 }
 
 @Composable
@@ -770,8 +768,8 @@ fun BatteryGauge(label: String, level: Int, isCharging: Boolean, isLoading: Bool
             contentDescription = accessLabel
         }
     ) {
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(80.dp)) {
-            androidx.compose.foundation.Canvas(modifier = Modifier.size(72.dp)) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(70.dp)) {
+            androidx.compose.foundation.Canvas(modifier = Modifier.size(62.dp)) {
                 val stroke = 9f
                 val ringRadius = size.minDimension / 2f - stroke
                 // Recessed "well" — soft radial gradient gives the gauge an inset, neumorphic feel
@@ -1102,7 +1100,7 @@ fun SectionCard(content: @Composable () -> Unit) {
                 .glassEffect(hazeState, shape, glassStyle())
                 .border(1.dp, glassBorder(), shape)
         ) {
-            Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) { content() }
+            Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) { content() }
         }
     } else {
         Card(
@@ -1117,7 +1115,7 @@ fun SectionCard(content: @Composable () -> Unit) {
             shape = shape,
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
         ) {
-            Column(modifier = Modifier.padding(16.dp)) { content() }
+            Column(modifier = Modifier.padding(14.dp)) { content() }
         }
     }
 }
@@ -1340,7 +1338,7 @@ fun DevicePickerScreen(vm: AirPodsViewModel) {
             ) {
                 Text("Connect", style = MaterialTheme.typography.labelLarge, color = Color.White)
             }
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(12.dp))
         }
     }
 }

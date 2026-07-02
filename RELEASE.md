@@ -12,9 +12,14 @@ trigger the GitHub Actions release build.
 - Find My screen and the confirm/rename dialogs compacted
 - Overlay permission screen explains the Android 13+ "Allow restricted settings" step for sideloaded builds
 - Battery widget shows a preview in the widget picker and updates passively over BLE (no connection needed)
+- Find My no longer crashes — added the missing VIBRATE permission the proximity haptics needed
 
 ### Changed
 - README expanded — badges, full supported-model list, download table, protocol/opcode details, project layout, and credits
+- Compressed the dashboard — tighter cards, smaller battery gauges and section gaps (less scrolling)
+- Press-and-Hold rebuilt as a compact popup (~35% smaller)
+- Consolidated to a single battery widget (removed the duplicate)
+- Release APK is now named `AirBridge-<version>.apk` instead of `app-release.apk`
 
 ## v0.2.0 — 2026-06-30
 

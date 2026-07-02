@@ -31,11 +31,6 @@ class BatteryWidget : AppWidgetProvider() {
                 .putInt("widget_case", case_)
                 .apply()
 
-            // Update Glance widget
-            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                GlanceBatteryWidget().updateAll(context)
-            }
-
             val intent = Intent(ACTION_UPDATE).apply {
                 setPackage(context.packageName)
                 putExtra(EXTRA_LEFT, left)

@@ -85,7 +85,9 @@ fun FindMyAirPodsScreen(vm: AirPodsViewModel, onBack: () -> Unit) {
                 context.getSystemService(Vibrator::class.java)
             }
             while (true) {
-                vibrator?.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+                try {
+                    vibrator?.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+                } catch (_: Exception) { /* haptics are optional — never crash Find My */ }
                 val interval = (2000 - proximity * 18L).coerceAtLeast(200L)
                 delay(interval)
             }

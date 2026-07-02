@@ -50,15 +50,19 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           chmod +x ./gradlew
+          VERSION="${GITHUB_REF_NAME#v}"
           if [ "${{ steps.keystore.outputs.present }}" = "true" ]; then
             echo "Keystore present — building signed release APK"
             ./gradlew :app:assembleRelease --no-daemon --stacktrace
-            echo "APK=app/build/outputs/apk/release/app-release.apk" >> "$GITHUB_ENV"
+            SRC=app/build/outputs/apk/release/app-release.apk
           else
             echo "No keystore secret — building debug APK"
             ./gradlew :app:assembleDebug --no-daemon --stacktrace
-            echo "APK=app/build/outputs/apk/debug/app-debug.apk" >> "$GITHUB_ENV"
+            SRC=app/build/outputs/apk/debug/app-debug.apk
           fi
+          OUT="AirBridge-${VERSION}.apk"
+          cp "$SRC" "$OUT"
+          echo "APK=$OUT" >> "$GITHUB_ENV"
 
       - name: Publish release with APK
         uses: softprops/action-gh-release@v2

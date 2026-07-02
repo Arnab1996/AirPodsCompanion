@@ -17,6 +17,7 @@ glanceAppwidget = "1.1.1"
 wearOngoing = "1.0.0"
 carApp = "1.7.0-beta01"
 haze = "1.7.2"
+dynamicanimation = "1.0.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -45,6 +46,7 @@ wear-ongoing = { module = "androidx.wear:wear-ongoing", version.ref = "wearOngoi
 car-app = { module = "androidx.car.app:app", version.ref = "carApp" }
 haze = { module = "dev.chrisbanes.haze:haze", version.ref = "haze" }
 haze-materials = { module = "dev.chrisbanes.haze:haze-materials", version.ref = "haze" }
+androidx-dynamicanimation = { module = "androidx.dynamicanimation:dynamicanimation", version.ref = "dynamicanimation" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

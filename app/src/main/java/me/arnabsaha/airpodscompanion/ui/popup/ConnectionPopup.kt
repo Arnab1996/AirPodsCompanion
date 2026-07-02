@@ -15,6 +15,9 @@ import android.view.WindowManager
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
+import androidx.dynamicanimation.animation.DynamicAnimation
+import androidx.dynamicanimation.animation.SpringAnimation
+import androidx.dynamicanimation.animation.SpringForce
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -48,6 +51,7 @@ class ConnectionPopup(private val context: Context) {
     private var isShowing = false
     private var lastShowTime = 0L
     private var autoDismissRunnable: Runnable? = null
+    private var islandView: View? = null
 
     // View references for real-time updates
     private var leftBatteryBar: ProgressBar? = null
@@ -98,14 +102,23 @@ class ConnectionPopup(private val context: Context) {
                 isShowing = true
                 lastShowTime = now
 
-                view.translationY = -dp(80).toFloat()
-                view.alpha = 0f
-                view.animate()
-                    .translationY(0f)
-                    .alpha(1f)
-                    .setDuration(440)
-                    .setInterpolator(OvershootInterpolator(1.1f))
-                    .start()
+                // Dynamic Island expand: the card springs open from its top with a bounce (no slide).
+                val island = islandView
+                if (island != null) {
+                    island.alpha = 0f
+                    island.scaleX = 0.7f
+                    island.scaleY = 0.35f
+                    island.post {
+                        island.pivotX = island.width / 2f
+                        island.pivotY = 0f
+                        island.animate().alpha(1f).setDuration(110).start()
+                        startSpring(island, DynamicAnimation.SCALE_X)
+                        startSpring(island, DynamicAnimation.SCALE_Y)
+                    }
+                } else {
+                    view.alpha = 0f
+                    view.animate().alpha(1f).setDuration(180).start()
+                }
 
                 // Auto-dismiss after a few seconds; a swipe-up still dismisses early.
                 autoDismissRunnable?.let { handler.removeCallbacks(it) }
@@ -158,25 +171,35 @@ class ConnectionPopup(private val context: Context) {
             isShowing = false
             cancelAutoDismiss()
 
-            // Continue upward from wherever the view is (it may be mid-swipe) and fade.
-            // A relative target avoids the jump-back-down that made a post-swipe dismiss feel laggy.
-            val target = view.translationY - dp(60)
-            view.animate()
-                .translationY(target)
+            // Collapse back up into the notch (reverse of the expand) and fade — quick.
+            val island = islandView ?: view
+            island.animate()
+                .scaleX(0.7f).scaleY(0.3f)
                 .alpha(0f)
-                .setDuration(170)
-                .setInterpolator(DecelerateInterpolator())
+                .setDuration(150)
+                .setInterpolator(AccelerateInterpolator())
                 .withEndAction { forceRemoveView() }
                 .start()
 
             // Safety net in case the animation is interrupted
-            handler.postDelayed({ forceRemoveView() }, 320)
+            handler.postDelayed({ forceRemoveView() }, 300)
         }
     }
 
     private fun cancelAutoDismiss() {
         autoDismissRunnable?.let { handler.removeCallbacks(it) }
         autoDismissRunnable = null
+    }
+
+    /** Springs a view property to 1f with a bouncy, snappy settle (Dynamic Island feel). */
+    private fun startSpring(view: View, property: DynamicAnimation.ViewProperty) {
+        SpringAnimation(view, property, 1f).apply {
+            spring = SpringForce(1f).apply {
+                dampingRatio = 0.5f    // medium-bouncy — a visible overshoot
+                stiffness = 800f       // snappy, not sluggish
+            }
+            start()
+        }
     }
 
     private fun forceRemoveView() {
@@ -191,6 +214,7 @@ class ConnectionPopup(private val context: Context) {
         leftBatteryBar = null; rightBatteryBar = null; caseBatteryBar = null
         leftBatteryText = null; rightBatteryText = null; caseBatteryText = null
         ancDot = null; ancText = null; leftEarDot = null; rightEarDot = null
+        islandView = null
     }
 
     @SuppressLint("SetTextI18n", "ClickableViewAccessibility")
@@ -379,6 +403,7 @@ class ConnectionPopup(private val context: Context) {
 
         statusRow.addView(earRow)
         container.addView(statusRow)
+        islandView = container
 
         // Wrap in FrameLayout with top padding; cap the island width + center it
         val wrapper = FrameLayout(context).apply {

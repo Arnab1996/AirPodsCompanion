@@ -85,7 +85,9 @@ fun FindMyAirPodsScreen(vm: AirPodsViewModel, onBack: () -> Unit) {
                 context.getSystemService(Vibrator::class.java)
             }
             while (true) {
-                vibrator?.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+                try {
+                    vibrator?.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+                } catch (_: Exception) { /* haptics are optional — never crash Find My */ }
                 val interval = (2000 - proximity * 18L).coerceAtLeast(200L)
                 delay(interval)
             }
@@ -140,12 +142,12 @@ fun FindMyAirPodsScreen(vm: AirPodsViewModel, onBack: () -> Unit) {
             )
         }
 
-        Spacer(Modifier.height(40.dp))
+        Spacer(Modifier.height(20.dp))
 
         // Proximity percentage
         Text(
             text = "$proximity%",
-            fontSize = 64.sp,
+            fontSize = 44.sp,
             fontWeight = FontWeight.Bold,
             color = proximityColor.copy(alpha = pulseAlpha)
         )
@@ -161,7 +163,7 @@ fun FindMyAirPodsScreen(vm: AirPodsViewModel, onBack: () -> Unit) {
             color = proximityColor
         )
 
-        Spacer(Modifier.height(40.dp))
+        Spacer(Modifier.height(20.dp))
 
         // Signal strength bars
         Row(
@@ -172,11 +174,11 @@ fun FindMyAirPodsScreen(vm: AirPodsViewModel, onBack: () -> Unit) {
             for (i in 1..5) {
                 val barThreshold = i * 20
                 val isActive = proximity >= barThreshold
-                val barHeight = (20 + i * 16).dp
+                val barHeight = (14 + i * 12).dp
 
                 Box(
                     modifier = Modifier
-                        .width(28.dp)
+                        .width(22.dp)
                         .height(barHeight)
                         .padding(horizontal = 3.dp)
                         .clip(RoundedCornerShape(4.dp))
@@ -188,7 +190,7 @@ fun FindMyAirPodsScreen(vm: AirPodsViewModel, onBack: () -> Unit) {
             }
         }
 
-        Spacer(Modifier.height(40.dp))
+        Spacer(Modifier.height(20.dp))
 
         Text(
             text = "Walk around slowly. The signal gets stronger as you get closer to your AirPods.",
@@ -202,13 +204,13 @@ fun FindMyAirPodsScreen(vm: AirPodsViewModel, onBack: () -> Unit) {
         // Found It — stops the proximity buzz and returns to the dashboard
         Button(
             onClick = { found = true; onBack() },
-            modifier = Modifier.fillMaxWidth().height(50.dp),
+            modifier = Modifier.fillMaxWidth().height(46.dp),
             shape = RoundedCornerShape(14.dp),
             colors = ButtonDefaults.buttonColors(containerColor = AppleGreen)
         ) {
             Text("Found It", style = MaterialTheme.typography.labelLarge, color = Color.White)
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(16.dp))
     }
 }

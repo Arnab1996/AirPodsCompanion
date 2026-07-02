@@ -158,17 +158,19 @@ class ConnectionPopup(private val context: Context) {
             isShowing = false
             cancelAutoDismiss()
 
-            // Clean dismiss: a small lift + fade, snappy and smooth (no long slide).
+            // Continue upward from wherever the view is (it may be mid-swipe) and fade.
+            // A relative target avoids the jump-back-down that made a post-swipe dismiss feel laggy.
+            val target = view.translationY - dp(60)
             view.animate()
-                .translationY(-dp(28).toFloat())
+                .translationY(target)
                 .alpha(0f)
-                .setDuration(200)
+                .setDuration(170)
                 .setInterpolator(DecelerateInterpolator())
                 .withEndAction { forceRemoveView() }
                 .start()
 
             // Safety net in case the animation is interrupted
-            handler.postDelayed({ forceRemoveView() }, 420)
+            handler.postDelayed({ forceRemoveView() }, 320)
         }
     }
 

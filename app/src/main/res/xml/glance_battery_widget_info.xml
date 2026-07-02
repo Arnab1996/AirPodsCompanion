@@ -5,4 +5,5 @@
     android:updatePeriodMillis="1800000"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen|keyguard"
-    android:initialLayout="@layout/glance_widget_loading" />
+    android:initialLayout="@layout/glance_widget_loading"
+    android:previewLayout="@layout/widget_battery" />

@@ -27,11 +27,11 @@ class HeadGestureDetector {
         private const val TAG = "HeadGesture"
         private const val CALIBRATION_SAMPLES = 10
         private const val BUFFER_SIZE = 30
-        private const val PEAK_THRESHOLD = 550          // lowered so the smaller-amplitude shake (yaw) registers
-        private const val DIRECTION_CHANGE_THRESHOLD = 200
+        private const val PEAK_THRESHOLD = 400          // lowered further so an ordinary head shake (yaw) registers
+        private const val DIRECTION_CHANGE_THRESHOLD = 150
         private const val MIN_EXTREMES_FAST = 4
         private const val MIN_EXTREMES_NORMAL = 3
-        private const val CONFIDENCE_THRESHOLD = 0.68f
+        private const val CONFIDENCE_THRESHOLD = 0.60f
         private const val GESTURE_COOLDOWN_MS = 5000L
         private const val ORIENTATION_OFFSET = 5500
     }
@@ -200,7 +200,7 @@ class HeadGestureDetector {
 
         // Amplitude factor (40%)
         val avgAmplitude = targetPeaks.map { kotlin.math.abs(it.second) }.average()
-        val amplitudeFactor = (avgAmplitude / 450.0).coerceIn(0.0, 1.0).toFloat()
+        val amplitudeFactor = (avgAmplitude / 350.0).coerceIn(0.0, 1.0).toFloat()
 
         // Rhythm factor (20%)
         val intervals = mutableListOf<Float>()

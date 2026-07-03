@@ -6,6 +6,11 @@ trigger the GitHub Actions release build.
 ## Unreleased
 - _Nothing yet._
 
+## v0.2.4 — 2026-07-03
+
+### Fixed
+- Dynamic Island is visible again. The v0.2.2 spring rework gated the fade-in behind a deferred callback, so the popup could get stranded fully transparent. It now animates immediately — pops open with an overshoot bounce, no slide — and can't get stuck hidden. Dropped the spring-physics dependency.
+
 ## v0.2.3 — 2026-07-02
 
 ### Fixed
@@ -83,6 +88,7 @@ First tagged release — an AirPods Pro companion for Android (phone + Wear OS).
 ### Build
 - GitHub Actions builds the APK and publishes a release on every `v*` tag
 
+[v0.2.4]: https://github.com/Arnab1996/AirPodsCompanion/releases/tag/v0.2.4
 [v0.2.3]: https://github.com/Arnab1996/AirPodsCompanion/releases/tag/v0.2.3
 [v0.2.2]: https://github.com/Arnab1996/AirPodsCompanion/releases/tag/v0.2.2
 [v0.2.1]: https://github.com/Arnab1996/AirPodsCompanion/releases/tag/v0.2.1

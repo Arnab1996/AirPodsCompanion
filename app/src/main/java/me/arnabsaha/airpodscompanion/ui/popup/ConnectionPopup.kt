@@ -15,9 +15,6 @@ import android.view.WindowManager
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
-import androidx.dynamicanimation.animation.DynamicAnimation
-import androidx.dynamicanimation.animation.SpringAnimation
-import androidx.dynamicanimation.animation.SpringForce
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -102,23 +99,17 @@ class ConnectionPopup(private val context: Context) {
                 isShowing = true
                 lastShowTime = now
 
-                // Dynamic Island expand: the card springs open from its top with a bounce (no slide).
-                val island = islandView
-                if (island != null) {
-                    island.alpha = 0f
-                    island.scaleX = 0.7f
-                    island.scaleY = 0.35f
-                    island.post {
-                        island.pivotX = island.width / 2f
-                        island.pivotY = 0f
-                        island.animate().alpha(1f).setDuration(110).start()
-                        startSpring(island, DynamicAnimation.SCALE_X)
-                        startSpring(island, DynamicAnimation.SCALE_Y)
-                    }
-                } else {
-                    view.alpha = 0f
-                    view.animate().alpha(1f).setDuration(180).start()
-                }
+                // Dynamic Island expand: pop open with a bounce (overshoot), not a slide.
+                // Animate immediately (no post/spring) so the reveal can't get stranded at alpha 0.
+                val island = islandView ?: view
+                island.alpha = 0f
+                island.scaleX = 0.7f
+                island.scaleY = 0.7f
+                island.animate()
+                    .scaleX(1f).scaleY(1f).alpha(1f)
+                    .setDuration(400)
+                    .setInterpolator(OvershootInterpolator(2.5f))
+                    .start()
 
                 // Auto-dismiss after a few seconds; a swipe-up still dismisses early.
                 autoDismissRunnable?.let { handler.removeCallbacks(it) }
@@ -189,17 +180,6 @@ class ConnectionPopup(private val context: Context) {
     private fun cancelAutoDismiss() {
         autoDismissRunnable?.let { handler.removeCallbacks(it) }
         autoDismissRunnable = null
-    }
-
-    /** Springs a view property to 1f with a bouncy, snappy settle (Dynamic Island feel). */
-    private fun startSpring(view: View, property: DynamicAnimation.ViewProperty) {
-        SpringAnimation(view, property, 1f).apply {
-            spring = SpringForce(1f).apply {
-                dampingRatio = 0.5f    // medium-bouncy — a visible overshoot
-                stiffness = 800f       // snappy, not sluggish
-            }
-            start()
-        }
     }
 
     private fun forceRemoveView() {

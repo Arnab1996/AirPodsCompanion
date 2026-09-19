@@ -31,6 +31,19 @@ object Radius {
     val chip = 8.dp
 }
 
+/**
+ * Alpha steps for text and icons drawn over a surface. The old ad-hoc values (0.3 to 0.5)
+ * fell below the 4.5:1 WCAG AA ratio on DarkSurface, so secondary copy was hard to read.
+ */
+object TextAlpha {
+    /** Descriptions and captions. 5.9:1 on DarkSurface. */
+    const val secondary = 0.62f
+    /** Trailing values on a settings row. */
+    const val value = 0.7f
+    /** Chevrons and other non-text glyphs. 3:1 minimum. */
+    const val decorative = 0.45f
+}
+
 private val DarkColorScheme = darkColorScheme(
     primary = AppleBlueDark,
     onPrimary = DarkOnSurface,

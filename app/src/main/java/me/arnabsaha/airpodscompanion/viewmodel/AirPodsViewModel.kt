@@ -12,8 +12,11 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import me.arnabsaha.airpodscompanion.ble.transport.AacpTransport
@@ -60,13 +63,14 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
             _serviceBound.value = true
             Log.d(TAG, "Service bound")
             startCollectingServiceFlows(service)
-            applySavedSettings(service)
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
             airPodsService = null
             serviceBound = false
             _serviceBound.value = false
+            serviceCollectors?.cancel()
+            applySettingsJob?.cancel()
             Log.d(TAG, "Service unbound")
         }
     }
@@ -114,7 +118,7 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     val nearestAirPods: StateFlow<me.arnabsaha.airpodscompanion.ble.scanner.AirPodsAdvertisement?> = _nearestAirPods.asStateFlow()
 
     private val _nearbyDevices = MutableStateFlow<List<me.arnabsaha.airpodscompanion.ble.scanner.AirPodsAdvertisement>>(emptyList())
-    /** All AirPods/Beats currently seen over BLE (passive — no connection needed), strongest signal first. */
+    /** All AirPods/Beats currently seen over BLE (passive, no connection needed), strongest signal first. */
     val nearbyDevices: StateFlow<List<me.arnabsaha.airpodscompanion.ble.scanner.AirPodsAdvertisement>> = _nearbyDevices.asStateFlow()
 
     private val _deviceInfo = MutableStateFlow<me.arnabsaha.airpodscompanion.service.DeviceInfo?>(null)
@@ -128,6 +132,15 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     private val _connectionActivity = MutableStateFlow(0)
     /** Advertisement activity: 0=disconnected, 4=idle, 5=music, 6=call. */
     val connectionActivity: StateFlow<Int> = _connectionActivity.asStateFlow()
+
+    /**
+     * True when a command sent right now would actually reach the AirPods. The UI gates its
+     * toggles and the noise control picker on this so a tap while the link is down reads as
+     * unavailable instead of silently doing nothing.
+     */
+    val isDeviceReachable: StateFlow<Boolean> = _connectionState
+        .map { it == AacpTransport.ConnectionState.CONNECTED }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     // ── Persisted settings (exposed as StateFlows for the UI) ────
 
@@ -217,9 +230,12 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
      */
     fun unbindService() {
         if (!serviceBound) return
+        serviceCollectors?.cancel()
+        applySettingsJob?.cancel()
         try {
             application.unbindService(serviceConnection)
         } catch (_: Exception) { }
+        airPodsService = null
         serviceBound = false
         _serviceBound.value = false
     }
@@ -282,7 +298,9 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
 
     /** Toggle head tracking / spatial audio. Returns the new active state. */
     fun toggleHeadTracking() {
-        // Cancel any pending delayed start
+        // Cancel any pending delayed start, otherwise the warm-up job fires 30s later and turns
+        // tracking back on behind the user.
+        applySettingsJob?.cancel()
         _headTrackingLoading.value = false
         withService("toggleHeadTracking") { service ->
             val active = service.toggleHeadTracking()
@@ -331,7 +349,7 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
     /**
      * Toggle whether AirBridge keeps running after the app is swiped away. When off, the service
      * fully stops on swipe (leaves "Active apps") but background features pause until reopened.
-     * Read by the service in onTaskRemoved — no live call needed.
+     * Read by the service in onTaskRemoved, no live call needed.
      */
     fun setRunInBackground(enabled: Boolean) {
         _runInBackground.value = enabled
@@ -421,108 +439,92 @@ class AirPodsViewModel(private val application: Application) : ViewModel() {
 
     /**
      * Collect all StateFlows from the service and forward them to our own StateFlows.
-     * Called once when the service is bound.
+     * Called every time the service binds. The forwarding collectors hang off one parent job so a
+     * rebind cancels the previous set instead of stacking a second one on top. The settings send
+     * that observeConnectionForSettings kicks off keeps its own job, cancelled alongside it.
      */
+    private var serviceCollectors: Job? = null
+
     private fun startCollectingServiceFlows(service: AirPodsService) {
+        serviceCollectors?.cancel()
         service.onAppOpened()
-        viewModelScope.launch {
-            service.aacpBattery.collect { _battery.value = it }
-        }
-        viewModelScope.launch {
-            service.earState.collect { _earState.value = it }
-        }
-        viewModelScope.launch {
-            service.ancMode.collect { _ancMode.value = it }
-        }
-        viewModelScope.launch {
-            service.bondedDeviceName.collect { _bondedDeviceName.value = it }
-        }
-        viewModelScope.launch {
-            service.connectionState.collect { state ->
-                _connectionState.value = state
-                if (state == AacpTransport.ConnectionState.CONNECTED) suppressDisconnectError = false
-                // Surface reconnection failures as transient errors (but not on a manual disconnect)
-                if (state == AacpTransport.ConnectionState.DISCONNECTED &&
-                    _battery.value != null && !suppressDisconnectError) {
-                    // Was previously connected and lost connection
-                    _connectionError.value = "Connection to AirPods lost"
+        serviceCollectors = viewModelScope.launch {
+            launch { service.aacpBattery.collect { _battery.value = it } }
+            launch { service.earState.collect { _earState.value = it } }
+            launch { service.ancMode.collect { _ancMode.value = it } }
+            launch { service.bondedDeviceName.collect { _bondedDeviceName.value = it } }
+            launch {
+                service.connectionState.collect { state ->
+                    _connectionState.value = state
+                    if (state == AacpTransport.ConnectionState.CONNECTED) suppressDisconnectError = false
+                    // Surface reconnection failures as transient errors (but not on a manual disconnect)
+                    if (state == AacpTransport.ConnectionState.DISCONNECTED &&
+                        _battery.value != null && !suppressDisconnectError) {
+                        // Was previously connected and lost connection
+                        _connectionError.value = "Connection to AirPods lost"
+                    }
                 }
             }
-        }
-        viewModelScope.launch {
-            service.bondedAirPodsList.collect { _bondedAirPodsList.value = it }
-        }
-        viewModelScope.launch {
-            service.isBluetoothProfileConnected.collect { _isBluetoothProfileConnected.value = it }
-        }
-        viewModelScope.launch {
-            service.leAudioCapability.collect { _leAudioCapability.value = it }
-        }
-        viewModelScope.launch {
-            service.nearestAirPods.collect { _nearestAirPods.value = it }
-        }
-        viewModelScope.launch {
-            service.detectedDevices.collect { map ->
-                _nearbyDevices.value = map.values.sortedByDescending { it.rssi }
+            launch { service.bondedAirPodsList.collect { _bondedAirPodsList.value = it } }
+            launch { service.isBluetoothProfileConnected.collect { _isBluetoothProfileConnected.value = it } }
+            launch { service.leAudioCapability.collect { _leAudioCapability.value = it } }
+            launch { service.nearestAirPods.collect { _nearestAirPods.value = it } }
+            launch {
+                service.detectedDevices.collect { map ->
+                    _nearbyDevices.value = map.values.sortedByDescending { it.rssi }
+                }
             }
-        }
-        viewModelScope.launch {
-            service.deviceInfo.collect { _deviceInfo.value = it }
-        }
-        viewModelScope.launch {
-            service.headGesture.collect { _headGesture.value = it }
-        }
-        viewModelScope.launch {
-            service.connectionActivity.collect { _connectionActivity.value = it }
+            launch { service.deviceInfo.collect { _deviceInfo.value = it } }
+            launch { service.headGesture.collect { _headGesture.value = it } }
+            launch { service.connectionActivity.collect { _connectionActivity.value = it } }
+            launch { observeConnectionForSettings(service) }
         }
     }
 
     /**
      * Apply all persisted settings to the service on each connection.
      * Uses a Job with 3-second debounce: if the connection drops within 3 seconds
-     * (common during reconnect cycles), the settings send is cancelled — no flooding.
+     * (common during reconnect cycles), the settings send is cancelled, no flooding.
      * Each new CONNECTED state cancels any pending job and starts fresh.
      */
     private var applySettingsJob: Job? = null
 
-    private fun applySavedSettings(service: AirPodsService) {
-        viewModelScope.launch {
-            service.connectionState.collect { state ->
-                if (state == AacpTransport.ConnectionState.CONNECTED) {
-                    applySettingsJob?.cancel()
-                    applySettingsJob = viewModelScope.launch {
-                        // Wait for connection to stabilize before sending
-                        kotlinx.coroutines.delay(3000)
-                        if (service.connectionState.value != AacpTransport.ConnectionState.CONNECTED) return@launch
-                        service.setConversationalAwareness(_caEnabled.value)
-                        kotlinx.coroutines.delay(200)
-                        if (service.connectionState.value != AacpTransport.ConnectionState.CONNECTED) return@launch
-                        service.setAdaptiveVolume(_avEnabled.value)
-                        kotlinx.coroutines.delay(200)
-                        if (service.connectionState.value != AacpTransport.ConnectionState.CONNECTED) return@launch
-                        service.setEarDetection(_edEnabled.value)
-                        kotlinx.coroutines.delay(200)
-                        if (service.connectionState.value != AacpTransport.ConnectionState.CONNECTED) return@launch
-                        service.setChimeVolume(_chimeVolume.value.toInt())
-                        kotlinx.coroutines.delay(200)
-                        if (service.connectionState.value != AacpTransport.ConnectionState.CONNECTED) return@launch
-                        service.transport.sendControlCommand(0x34, if (_allowOff.value) 0x01 else 0x02)
-                        Log.d(TAG, "Saved settings applied (staggered)")
+    private suspend fun observeConnectionForSettings(service: AirPodsService) {
+        service.connectionState.collect { state ->
+            if (state == AacpTransport.ConnectionState.CONNECTED) {
+                applySettingsJob?.cancel()
+                applySettingsJob = viewModelScope.launch {
+                    // Wait for connection to stabilize before sending
+                    kotlinx.coroutines.delay(3000)
+                    if (service.connectionState.value != AacpTransport.ConnectionState.CONNECTED) return@launch
+                    service.setConversationalAwareness(_caEnabled.value)
+                    kotlinx.coroutines.delay(200)
+                    if (service.connectionState.value != AacpTransport.ConnectionState.CONNECTED) return@launch
+                    service.setAdaptiveVolume(_avEnabled.value)
+                    kotlinx.coroutines.delay(200)
+                    if (service.connectionState.value != AacpTransport.ConnectionState.CONNECTED) return@launch
+                    service.setEarDetection(_edEnabled.value)
+                    kotlinx.coroutines.delay(200)
+                    if (service.connectionState.value != AacpTransport.ConnectionState.CONNECTED) return@launch
+                    service.setChimeVolume(_chimeVolume.value.toInt())
+                    kotlinx.coroutines.delay(200)
+                    if (service.connectionState.value != AacpTransport.ConnectionState.CONNECTED) return@launch
+                    service.transport.sendControlCommand(0x34, if (_allowOff.value) 0x01 else 0x02)
+                    Log.d(TAG, "Saved settings applied (staggered)")
 
-                        // Head tracking: delayed start after 30s to let the L2CAP
-                        // channel stabilize with battery/ear data first.
-                        if (_headTracking.value) {
-                            _headTrackingLoading.value = true
-                            Log.d(TAG, "Head tracking: waiting 30s for stable connection...")
-                            kotlinx.coroutines.delay(30_000)
-                            if (service.connectionState.value != AacpTransport.ConnectionState.CONNECTED) {
-                                _headTrackingLoading.value = false
-                                return@launch
-                            }
-                            service.startHeadTracking()
+                    // Head tracking: delayed start after 30s to let the L2CAP
+                    // channel stabilize with battery/ear data first.
+                    if (_headTracking.value) {
+                        _headTrackingLoading.value = true
+                        Log.d(TAG, "Head tracking: waiting 30s for stable connection")
+                        kotlinx.coroutines.delay(30_000)
+                        if (service.connectionState.value != AacpTransport.ConnectionState.CONNECTED) {
                             _headTrackingLoading.value = false
-                            Log.d(TAG, "Head tracking: started after 30s delay")
+                            return@launch
                         }
+                        service.startHeadTracking()
+                        _headTrackingLoading.value = false
+                        Log.d(TAG, "Head tracking: started after 30s delay")
                     }
                 }
             }

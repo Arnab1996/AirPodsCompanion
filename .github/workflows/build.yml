@@ -34,10 +34,16 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build and test
+      - name: Unit tests
         run: |
           chmod +x ./gradlew
-          ./gradlew :app:assembleDebug :wear:assembleDebug :app:testDebugUnitTest --no-daemon --stacktrace
+          ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Build phone app
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Build wear app
+        run: ./gradlew :wear:assembleDebug --no-daemon --stacktrace
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

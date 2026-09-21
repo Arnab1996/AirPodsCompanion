@@ -21,7 +21,7 @@ class BatteryWidget : AppWidgetProvider() {
         const val EXTRA_CASE = "case"
 
         fun sendUpdate(context: Context, left: Int, right: Int, case_: Int) {
-            // Write to prefs for Glance + Android Auto to read
+            // Write to prefs for Android Auto to read
             context.getSharedPreferences("airbridge_settings", Context.MODE_PRIVATE)
                 .edit()
                 .putInt("widget_left", left)

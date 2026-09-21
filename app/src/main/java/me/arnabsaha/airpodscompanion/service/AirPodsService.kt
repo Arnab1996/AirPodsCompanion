@@ -151,6 +151,7 @@ class AirPodsService : Service() {
     val connectionActivity: StateFlow<Int> = _connectionActivity.asStateFlow()
     private var lastLidOpen = false
     private var lastWidgetKey: Triple<Int, Int, Int>? = null
+    private var lastBatteryPacket: AacpBatteryState? = null
 
     // List of all bonded AirPods devices
     private val _bondedAirPodsList = MutableStateFlow<List<BondedAirPods>>(emptyList())
@@ -966,7 +967,18 @@ class AirPodsService : Service() {
             offset += 5
         }
 
+        // Compare against the last decoded packet, not the flow: the advertisement collector also
+        // writes _aacpBattery with a passive case level and fans nothing out, which would otherwise
+        // make a real case reading look like a repeat.
+        val previous = lastBatteryPacket
+        lastBatteryPacket = state
         _aacpBattery.value = state
+        // The alert threshold is a user setting that can change between packets, and the alert
+        // manager latches per component, so re-check it even on a repeat.
+        batteryAlertManager.checkAndAlert(state)
+        // The AirPods re-send battery on a timer, so most packets carry the values we already have.
+        // Only fan out to the watch, the widget and automation when something actually moved.
+        if (state == previous) return
         Log.d(TAG, "Battery: L=${state.leftLevel}% R=${state.rightLevel}% C=${state.caseLevel}%")
         syncToWatch()
 
@@ -982,8 +994,7 @@ class AirPodsService : Service() {
         // Update popup if showing
         connectionPopup.updateContent(state, _ancMode.value, _earState.value)
 
-        // Battery alerts + automation broadcasts
-        batteryAlertManager.checkAndAlert(state)
+        // Automation broadcast
         me.arnabsaha.airpodscompanion.intents.IntentBroadcaster.broadcastBattery(this, state)
     }
 
@@ -1011,6 +1022,9 @@ class AirPodsService : Service() {
         )
 
         _earState.value = newState
+        // A repeat of the same state cannot trigger any of the play/pause transitions below, so
+        // there is nothing to do but store it.
+        if (newState == prevState) return
         Log.d(TAG, "Ear: L=${if (newState.leftInEar) "IN" else "OUT"} R=${if (newState.rightInEar) "IN" else "OUT"}")
         syncToWatch()
         connectionPopup.updateContent(_aacpBattery.value, _ancMode.value, newState)

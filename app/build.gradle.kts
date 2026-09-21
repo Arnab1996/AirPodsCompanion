@@ -73,6 +73,9 @@ android {
 
     buildFeatures {
         compose = true
+        // The About screen reads BuildConfig.VERSION_NAME so the version can never drift
+        // from the one declared above.
+        buildConfig = true
     }
 }
 
@@ -80,6 +83,7 @@ dependencies {
     // Core
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
 
     // Compose

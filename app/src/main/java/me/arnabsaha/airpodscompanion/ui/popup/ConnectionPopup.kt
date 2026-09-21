@@ -48,6 +48,7 @@ class ConnectionPopup(private val context: Context) {
     private var isShowing = false
     private var lastShowTime = 0L
     private var autoDismissRunnable: Runnable? = null
+    private var removeSafetyRunnable: Runnable? = null
     private var islandView: View? = null
 
     // View references for real-time updates
@@ -91,6 +92,13 @@ class ConnectionPopup(private val context: Context) {
 
         handler.post {
             try {
+                // A dismiss that is still collapsing removes the view two ways: the collapse
+                // animation's end action and a 300ms safety net. Both call forceRemoveView(),
+                // which would take the new popup down once popupView points at it. Cancel the
+                // animation and drop the old view before attaching the new one.
+                popupView?.let { (islandView ?: it).animate().cancel() }
+                forceRemoveView()
+
                 val view = createPopupView(deviceName, battery, ancMode, earState, codec)
                 val params = createLayoutParams()
 
@@ -98,6 +106,19 @@ class ConnectionPopup(private val context: Context) {
                 popupView = view
                 isShowing = true
                 lastShowTime = now
+
+                // Describe the island for TalkBack. The lid-open popup uses this too, and then the
+                // AirPods are not connected, so name the device and what we know rather than a
+                // connection that did not happen. A polite live region is the supported way to have
+                // this read out; announceForAccessibility is deprecated from API 36.
+                val levels = battery
+                    ?.takeIf { it.leftLevel >= 0 && it.rightLevel >= 0 }
+                    ?.let { "Left ${it.leftLevel} percent, right ${it.rightLevel} percent. " }
+                    .orEmpty()
+                (islandView ?: view).apply {
+                    contentDescription = "$deviceName. $levels$ancMode"
+                    accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+                }
 
                 // Dynamic Island expand: pop open with a bounce (overshoot), not a slide.
                 // Animate immediately (no post/spring) so the reveal can't get stranded at alpha 0.
@@ -162,18 +183,23 @@ class ConnectionPopup(private val context: Context) {
             isShowing = false
             cancelAutoDismiss()
 
-            // Collapse back up into the notch (reverse of the expand) and fade — quick.
+            // Collapse back up into the notch (reverse of the expand) and fade, quick.
             val island = islandView ?: view
             island.animate()
                 .scaleX(0.7f).scaleY(0.3f)
                 .alpha(0f)
                 .setDuration(150)
                 .setInterpolator(AccelerateInterpolator())
-                .withEndAction { forceRemoveView() }
+                // Only tear down the view this dismiss started on. A show() inside the 150ms
+                // window has already swapped popupView, and that one must survive.
+                .withEndAction { if (popupView === view) forceRemoveView() }
                 .start()
 
             // Safety net in case the animation is interrupted
-            handler.postDelayed({ forceRemoveView() }, 300)
+            cancelRemoveSafety()
+            val safety = Runnable { if (popupView === view) forceRemoveView() }
+            removeSafetyRunnable = safety
+            handler.postDelayed(safety, 300)
         }
     }
 
@@ -182,8 +208,14 @@ class ConnectionPopup(private val context: Context) {
         autoDismissRunnable = null
     }
 
+    private fun cancelRemoveSafety() {
+        removeSafetyRunnable?.let { handler.removeCallbacks(it) }
+        removeSafetyRunnable = null
+    }
+
     private fun forceRemoveView() {
         cancelAutoDismiss()
+        cancelRemoveSafety()
         val view = popupView ?: return
         try {
             windowManager.removeView(view)
@@ -432,15 +464,17 @@ class ConnectionPopup(private val context: Context) {
                         if (deltaY < -threshold || velocity < -SWIPE_VELOCITY_THRESHOLD) {
                             dismiss()
                         } else {
-                            // Snap back — only a deliberate swipe-up dismisses (no tap action)
-                            popupView?.animate()?.translationY(0f)?.setDuration(200)?.start()
+                            // Snap back. Only a deliberate swipe-up dismisses, there is no tap action.
+                            popupView?.animate()?.translationY(0f)?.setDuration(220)
+                                ?.setInterpolator(DecelerateInterpolator())?.start()
                         }
                         return true
                     }
                     MotionEvent.ACTION_CANCEL -> {
                         velocityTracker?.recycle()
                         velocityTracker = null
-                        popupView?.animate()?.translationY(0f)?.setDuration(200)?.start()
+                        popupView?.animate()?.translationY(0f)?.setDuration(220)
+                            ?.setInterpolator(DecelerateInterpolator())?.start()
                         return true
                     }
                 }

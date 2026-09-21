@@ -67,4 +67,8 @@ dependencies {
 
     // Ongoing Activity
     implementation(libs.wear.ongoing)
+
+    // ListenableFuture plumbing for the tile service, and Task.await() for the Data Layer
+    implementation(libs.concurrent.futures)
+    implementation(libs.coroutines.play.services)
 }

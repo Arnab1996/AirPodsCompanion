@@ -2,18 +2,18 @@ package me.arnabsaha.airpodscompanion.wear
 
 import android.content.ComponentName
 import android.content.Context
-import androidx.wear.tiles.ActionBuilders
-import androidx.wear.tiles.ColorBuilders.argb
-import androidx.wear.tiles.DimensionBuilders.dp
-import androidx.wear.tiles.DimensionBuilders.sp
-import androidx.wear.tiles.LayoutElementBuilders
-import androidx.wear.tiles.ModifiersBuilders
+import androidx.concurrent.futures.ResolvableFuture
+import androidx.wear.protolayout.ActionBuilders
+import androidx.wear.protolayout.ColorBuilders.argb
+import androidx.wear.protolayout.DimensionBuilders.dp
+import androidx.wear.protolayout.DimensionBuilders.sp
+import androidx.wear.protolayout.LayoutElementBuilders
+import androidx.wear.protolayout.ModifiersBuilders
+import androidx.wear.protolayout.ResourceBuilders
+import androidx.wear.protolayout.TimelineBuilders
 import androidx.wear.tiles.RequestBuilders
-import androidx.wear.tiles.ResourceBuilders
 import androidx.wear.tiles.TileBuilders
 import androidx.wear.tiles.TileService
-import androidx.wear.tiles.TimelineBuilders
-import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 
 /**
@@ -55,14 +55,14 @@ class AirBridgeTileService : TileService() {
             .setTileTimeline(timeline)
             .build()
 
-        return Futures.immediateFuture(tile)
+        return ResolvableFuture.create<TileBuilders.Tile>().apply { set(tile) }
     }
 
     override fun onTileResourcesRequest(requestParams: RequestBuilders.ResourcesRequest): ListenableFuture<ResourceBuilders.Resources> {
         val resources = ResourceBuilders.Resources.Builder()
             .setVersion(RESOURCES_VERSION)
             .build()
-        return Futures.immediateFuture(resources)
+        return ResolvableFuture.create<ResourceBuilders.Resources>().apply { set(resources) }
     }
 
     /**

@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.center
@@ -69,6 +70,10 @@ fun BatteryGauge(
     val wellShadow = if (dark) Color.Black.copy(alpha = 0.22f) else Color.Black.copy(alpha = 0.08f)
     val trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
 
+    // The AirPods report a component as DISCONNECTED when a bud is off or out of range, and the
+    // service turns that into -1. Distinct from still waiting for the first packet.
+    val unavailable = level < 0 && !isLoading
+
     val state = when {
         level >= 0 && isCharging -> "$level percent, charging"
         level >= 0 -> "$level percent"
@@ -82,12 +87,15 @@ fun BatteryGauge(
             contentDescription = "$label battery: $state"
         }
     ) {
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(70.dp)) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.size(58.dp).alpha(if (unavailable) 0.4f else 1f)
+        ) {
             Spacer(
                 Modifier
-                    .size(62.dp)
+                    .size(52.dp)
                     .drawWithCache {
-                        val stroke = 9f
+                        val stroke = 7f
                         val ringRadius = size.minDimension / 2f - stroke
                         val well = Brush.radialGradient(
                             listOf(wellHighlight, wellShadow),
@@ -100,8 +108,8 @@ fun BatteryGauge(
                             val sweep = 360f * animatedLevel.value
                             if (sweep > 0f) {
                                 drawArc(
-                                    color.copy(alpha = 0.30f), -90f, sweep, false,
-                                    style = Stroke(stroke * 2.4f, cap = StrokeCap.Round)
+                                    color.copy(alpha = 0.20f), -90f, sweep, false,
+                                    style = Stroke(stroke * 1.7f, cap = StrokeCap.Round)
                                 )
                                 drawArc(
                                     color, -90f, sweep, false,
@@ -114,7 +122,7 @@ fun BatteryGauge(
             if (level >= 0) {
                 Text(
                     text = "$level%",
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -122,11 +130,11 @@ fun BatteryGauge(
                 Text(
                     text = if (isLoading) "Updating" else if (label == "Case") "Closed" else "—",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = TextAlpha.decorative)
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = TextAlpha.secondary)
                 )
             }
         }
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(3.dp))
         Text(
             label,
             style = MaterialTheme.typography.labelMedium,
@@ -151,7 +159,7 @@ fun EarDot(label: String, inEar: Boolean) {
     ) {
         Box(
             modifier = Modifier
-                .size(10.dp)
+                .size(9.dp)
                 .clip(CircleShape)
                 .background(if (inEar) AppleGreen else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f))
         )

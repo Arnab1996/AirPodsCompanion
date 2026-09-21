@@ -80,7 +80,7 @@ fun AncSegmentedControl(
             .alpha(if (available) 1f else 0.4f)
             .clip(RoundedCornerShape(16.dp))
             .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
-            .padding(5.dp)
+            .padding(4.dp)
             .selectableGroup(),
         horizontalArrangement = Arrangement.spacedBy(5.dp)
     ) {
@@ -106,7 +106,7 @@ fun AncSegmentedControl(
                 Modifier
                     .weight(1f)
                     .scale(pillScale)
-                    .shadow(6.dp, pillShape)
+                    .shadow(3.dp, pillShape)
                     .clip(pillShape)
                     .background(Brush.verticalGradient(listOf(primary, primary.copy(alpha = 0.82f))))
             } else {
@@ -125,11 +125,11 @@ fun AncSegmentedControl(
                             onModeChange(opt.mode)
                         }
                     )
-                    .padding(vertical = 10.dp),
+                    .padding(vertical = 8.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(opt.icon, null, Modifier.size(20.dp), tint = contentColor)
+                    Icon(opt.icon, null, Modifier.size(18.dp), tint = contentColor)
                     Spacer(Modifier.height(4.dp))
                     Text(
                         text = opt.label,

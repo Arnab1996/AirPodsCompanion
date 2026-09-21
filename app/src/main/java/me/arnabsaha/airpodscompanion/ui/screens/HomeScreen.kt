@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
@@ -36,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.arnabsaha.airpodscompanion.ui.components.AppleSlider
@@ -52,6 +54,7 @@ import me.arnabsaha.airpodscompanion.ui.theme.AppleGreen
 import me.arnabsaha.airpodscompanion.ui.theme.AppleOrange
 import me.arnabsaha.airpodscompanion.ui.theme.GlassBackdrop
 import me.arnabsaha.airpodscompanion.ui.theme.LocalHazeState
+import me.arnabsaha.airpodscompanion.ui.theme.Radius
 import me.arnabsaha.airpodscompanion.ui.theme.Spacing
 import me.arnabsaha.airpodscompanion.ui.theme.TextAlpha
 import me.arnabsaha.airpodscompanion.ui.theme.rememberGlassState
@@ -82,28 +85,28 @@ fun HomeScreen(
                     .fillMaxSize()
                     .windowInsetsPadding(WindowInsets.statusBars)
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp)
+                    .padding(horizontal = Spacing.l)
             ) {
                 Spacer(Modifier.height(Spacing.l))
                 HomeHeader(vm)
 
-                Spacer(Modifier.height(Spacing.xxl))
+                Spacer(Modifier.height(Spacing.l))
                 BatteryCard(vm)
 
-                Spacer(Modifier.height(Spacing.m))
+                Spacer(Modifier.height(Spacing.s))
                 NoiseControl(vm)
 
-                Spacer(Modifier.height(Spacing.m))
+                Spacer(Modifier.height(Spacing.s))
                 UtilitiesCard(vm, onOpenFindMy)
 
-                Spacer(Modifier.height(Spacing.m))
+                Spacer(Modifier.height(Spacing.s))
                 SectionCard {
                     NavRow("Settings", onClick = onOpenSettings, icon = Icons.Default.Settings)
                     RowDivider()
                     NavRow("About AirBridge", onClick = onOpenAbout, icon = Icons.Default.Info)
                 }
 
-                Spacer(Modifier.height(bottomInset + Spacing.xxl))
+                Spacer(Modifier.height(bottomInset + Spacing.l))
             }
         }
     }
@@ -116,11 +119,15 @@ private fun HomeHeader(vm: AirPodsViewModel) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = deviceName ?: "AirPods Pro",
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onBackground
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onBackground,
+                // A renamed pair can be long enough to run into the ear indicators.
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             StatusLine(vm)
         }
+        Spacer(Modifier.width(Spacing.m))
         EarDots(vm)
     }
 }
@@ -150,9 +157,16 @@ private fun StatusLine(vm: AirPodsViewModel) {
 @Composable
 private fun EarDots(vm: AirPodsViewModel) {
     val earState by vm.earState.collectAsStateWithLifecycle()
-    Row {
+    // On its own tinted pill so the green reads the same whatever the backdrop is doing behind it.
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(Radius.chip))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         EarDot("L", earState.leftInEar)
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(10.dp))
         EarDot("R", earState.rightInEar)
     }
 }

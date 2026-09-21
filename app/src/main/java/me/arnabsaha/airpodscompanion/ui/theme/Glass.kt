@@ -47,7 +47,9 @@ fun GlassBackdrop(
 ) {
     val base = if (darkTheme) listOf(GlassDarkTop, GlassDarkMid, GlassDarkBottom)
     else listOf(GlassLightTop, GlassLightMid, GlassLightBottom)
-    val blobAlpha = if (darkTheme) 0.38f else 0.32f
+    // Kept low. These only need to give the frosted cards something to refract, and anything
+    // stronger fights the status colours drawn on top of it.
+    val blobAlpha = if (darkTheme) 0.22f else 0.18f
 
     Box(modifier.fillMaxSize().hazeSource(hazeState)) {
         Canvas(Modifier.fillMaxSize()) {
@@ -63,9 +65,11 @@ fun GlassBackdrop(
                     radius = radius, center = center
                 )
             }
-            blob(GlassBlobBlue, 0.16f, 0.10f, 0.75f)
-            blob(GlassBlobPurple, 0.92f, 0.04f, 0.62f)
-            blob(GlassBlobTeal, 0.5f, 0.96f, 0.85f)
+            // Nothing sits in the top right corner: that is where the ear indicators live and a
+            // coloured glow behind them muddies the green.
+            blob(GlassBlobBlue, 0.12f, 0.18f, 0.70f)
+            blob(GlassBlobPurple, 0.95f, 0.46f, 0.55f)
+            blob(GlassBlobTeal, 0.5f, 0.96f, 0.80f)
         }
     }
 }

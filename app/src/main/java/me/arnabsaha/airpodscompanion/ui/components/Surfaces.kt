@@ -46,7 +46,7 @@ fun SectionCard(
                 .glassEffect(hazeState, shape, glassStyle())
                 .border(1.dp, glassBorder(), shape)
         ) {
-            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), content = content)
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp), content = content)
         }
     } else {
         Card(
@@ -57,7 +57,7 @@ fun SectionCard(
             shape = shape,
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
         ) {
-            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp), content = content)
+            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp), content = content)
         }
     }
 }
@@ -71,7 +71,7 @@ fun SectionHeader(title: String, modifier: Modifier = Modifier) {
         fontWeight = FontWeight.SemiBold,
         letterSpacing = 0.6.sp,
         color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f),
-        modifier = modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp)
+        modifier = modifier.padding(start = 14.dp, top = 6.dp, bottom = 6.dp)
     )
 }
 

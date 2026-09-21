@@ -60,13 +60,13 @@ fun SettingToggle(
                     onToggle(it)
                 }
             )
-            .padding(vertical = 10.dp),
+            .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
             Text(
                 title,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = contentAlpha)
             )
             Text(
@@ -119,7 +119,7 @@ fun NavRow(
         }
         Text(
             title,
-            style = MaterialTheme.typography.bodyLarge,
+            style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = contentAlpha),
             modifier = Modifier.weight(1f)
         )
@@ -144,13 +144,13 @@ fun InfoRow(label: String, value: String, dense: Boolean = false) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = if (dense) 8.dp else 12.dp)
+            .padding(vertical = if (dense) 7.dp else 10.dp)
             .semantics(mergeDescendants = true) {},
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             label,
-            style = if (dense) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge,
+            style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f)
         )

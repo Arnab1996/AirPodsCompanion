@@ -62,6 +62,13 @@ android {
         abortOnError = false
     }
 
+    testOptions {
+        // The decoders log on their reject paths, and android.util.Log is a stub in unit tests that
+        // throws unless stubs are told to return defaults. Without this every "returns null for bad
+        // input" test fails with a bare RuntimeException.
+        unitTests.isReturnDefaultValues = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

@@ -14,6 +14,8 @@ wearTiles = "1.4.1"
 wearWatchface = "1.2.1"
 horologist = "0.6.20"
 wearOngoing = "1.0.0"
+concurrentFutures = "1.1.0"
+coroutinesPlayServices = "1.9.0"
 carApp = "1.7.0-beta01"
 haze = "1.7.2"
 
@@ -41,6 +43,8 @@ wear-tiles-material = { module = "androidx.wear.tiles:tiles-material", version.r
 wear-watchface-complications-data-source-ktx = { module = "androidx.wear.watchface:watchface-complications-data-source-ktx", version.ref = "wearWatchface" }
 horologist-compose-tools = { module = "com.google.android.horologist:horologist-compose-tools", version.ref = "horologist" }
 wear-ongoing = { module = "androidx.wear:wear-ongoing", version.ref = "wearOngoing" }
+concurrent-futures = { module = "androidx.concurrent:concurrent-futures", version.ref = "concurrentFutures" }
+coroutines-play-services = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-play-services", version.ref = "coroutinesPlayServices" }
 car-app = { module = "androidx.car.app:app", version.ref = "carApp" }
 haze = { module = "dev.chrisbanes.haze:haze", version.ref = "haze" }
 haze-materials = { module = "dev.chrisbanes.haze:haze-materials", version.ref = "haze" }

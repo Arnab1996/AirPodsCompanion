@@ -39,14 +39,10 @@ jobs:
           chmod +x ./gradlew
           ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
-      # Both of these are red on main already and predate this workflow. They report but do not
-      # block, so the phone compile check is usable today. Drop continue-on-error once fixed.
       - name: Build wear app
-        continue-on-error: true
         run: ./gradlew :wear:assembleDebug --no-daemon --stacktrace
 
       - name: Unit tests
-        continue-on-error: true
         run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
 
       - name: Upload debug APK

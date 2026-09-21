@@ -45,14 +45,15 @@ object OngoingActivityManager {
         val statusText = buildStatusText(leftBattery, rightBattery)
         val ancText = ancModeLabel(ancMode)
 
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        // OngoingActivity decorates the builder, so it has to be handed the builder and built
+        // afterwards. Passing an already-built Notification no longer compiles.
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(deviceName)
             .setContentText(statusText)
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .setContentIntent(pendingIntent)
-            .build()
 
         val ongoingStatus = Status.Builder()
             .addTemplate("#battery# #anc#")
@@ -60,7 +61,7 @@ object OngoingActivityManager {
             .addPart("anc", Status.TextPart(ancText))
             .build()
 
-        val ongoingActivity = OngoingActivity.Builder(context, NOTIFICATION_ID, notification)
+        val ongoingActivity = OngoingActivity.Builder(context, NOTIFICATION_ID, builder)
             .setStaticIcon(R.mipmap.ic_launcher)
             .setTouchIntent(pendingIntent)
             .setStatus(ongoingStatus)
@@ -69,7 +70,7 @@ object OngoingActivityManager {
         ongoingActivity.apply(context)
 
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(NOTIFICATION_ID, notification)
+        nm.notify(NOTIFICATION_ID, builder.build())
 
         isActive = true
     }
